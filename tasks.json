@@ -1,0 +1,48 @@
+{
+    "tasks": [
+        {
+            "task": "明日方舟",
+            "done": false,
+            "quick_launch": [
+                "C:\\Users\\Jonat\\Desktop\\明日方舟-arknight.lnk"
+            ]
+        },
+        {
+            "task": "MAA",
+            "done": false,
+            "quick_launch": [
+                "C:\\Users\\Jonat\\Desktop\\MAA-v5.2.0-win-x64\\MAA.exe",
+                "C:/Users/Jonat/Documents/AutoScript/MAA-v5.2.0-win-x64/MAA.exe"
+            ]
+        },
+        {
+            "task": "Nikke",
+            "done": false,
+            "quick_launch": [
+                "C:\\Users\\Public\\Desktop\\NIKKE.lnk"
+            ]
+        },
+        {
+            "task": "Fgo",
+            "done": false,
+            "quick_launch": [
+                "C:\\Users\\Jonat\\Desktop\\FateGo.lnk"
+            ]
+        },
+        {
+            "task": "steam",
+            "done": false,
+            "quick_launch": [
+                "C:\\Users\\Jonat\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\Steam\\Steam.lnk"
+            ]
+        },
+        {
+            "task": "Azurlane",
+            "done": false,
+            "quick_launch": [
+                "C:/Program Files/Netease/MuMuPlayerGlobal-12.0/shell/MuMuPlayer.exe"
+            ]
+        }
+    ],
+    "quick_launch": "C:\\Users\\Public\\Desktop\\Microsoft Edge.lnk"
+}
