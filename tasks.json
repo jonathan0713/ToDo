@@ -11,7 +11,6 @@
             "task": "MAA",
             "done": false,
             "quick_launch": [
-                "C:\\Users\\Jonat\\Desktop\\MAA-v5.2.0-win-x64\\MAA.exe",
                 "C:/Users/Jonat/Documents/AutoScript/MAA-v5.2.0-win-x64/MAA.exe"
             ]
         },
@@ -40,7 +39,8 @@
             "task": "Azurlane",
             "done": false,
             "quick_launch": [
-                "C:/Program Files/Netease/MuMuPlayerGlobal-12.0/shell/MuMuPlayer.exe"
+                "C:/Users/Jonat/Desktop/碧藍航線-MuMu Player 12-2.lnk",
+                "C:/Users/Jonat/Documents/AutoScript/AzurLaneAutoScript/Alas.exe"
             ]
         }
     ],
