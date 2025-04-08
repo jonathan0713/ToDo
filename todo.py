@@ -68,7 +68,11 @@ def launch_app():
         quick_launch_paths = data["tasks"][selected[0]]["quick_launch"]
         if quick_launch_paths:
             for path in quick_launch_paths:
-                subprocess.Popen(path, shell=True)
+                try:
+                    print(f"Launching: {path}")
+                    subprocess.Popen(path, cwd=os.path.dirname(path), shell=True)
+                except Exception as e:
+                    print(f"Error launching {path}: {e}")
         else:
             messagebox.showwarning("提醒", "未設定應用程式")
     else:

@@ -43,6 +43,22 @@
                 "C:/Users/Jonat/Desktop/碧藍航線-MuMu Player 12-2.lnk",
                 "C:/Users/Jonat/Documents/AutoScript/AzurLaneAutoScript/Alas.exe"
             ]
+        },
+        {
+            "task": "starrail",
+            "done": false,
+            "quick_launch": [
+                "C:/Users/Jonat/Documents/AutoScript/StarRailCopilot/src.exe",
+                "C:/Users/Jonat/Desktop/starrail.lnk"
+            ]
+        },
+        {
+            "task": "test",
+            "done": false,
+            "quick_launch": [
+                "C:/Users/Jonat/Documents/AutoScript/StarRailCopilot/src.exe",
+                "C:/Users/Jonat/Documents/AutoScript/AzurLaneAutoScript/Alas.exe"
+            ]
         }
     ],
     "quick_launch": "C:\\Users\\Public\\Desktop\\Microsoft Edge.lnk"
