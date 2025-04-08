@@ -48,16 +48,8 @@
             "task": "starrail",
             "done": false,
             "quick_launch": [
-                "C:/Users/Jonat/Documents/AutoScript/StarRailCopilot/src.exe",
-                "C:/Users/Jonat/Desktop/starrail.lnk"
-            ]
-        },
-        {
-            "task": "test",
-            "done": false,
-            "quick_launch": [
-                "C:/Users/Jonat/Documents/AutoScript/StarRailCopilot/src.exe",
-                "C:/Users/Jonat/Documents/AutoScript/AzurLaneAutoScript/Alas.exe"
+                "C:/Users/Jonat/Desktop/starrail.lnk",
+                "C:/Users/Jonat/Documents/AutoScript/StarRailCopilot/src.exe.lnk"
             ]
         }
     ],
