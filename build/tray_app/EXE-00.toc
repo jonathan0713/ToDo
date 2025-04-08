@@ -324,7 +324,7 @@
  [],
  False,
  False,
- 1743242785,
+ 1744115695,
  [('runw.exe',
    'C:\\Users\\Jonat\\miniconda3\\Lib\\site-packages\\PyInstaller\\bootloader\\Windows-64bit-intel\\runw.exe',
    'EXECUTABLE')],
