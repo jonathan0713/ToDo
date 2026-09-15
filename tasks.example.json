@@ -1,0 +1,25 @@
+{
+  "version": 4,
+  "settings": {
+    "auto_hide_after_launch": true
+  },
+  "groups": [
+    {"id": "background", "name": "背景執行", "batch_launch": true},
+    {"id": "light_manual", "name": "輕量手操", "batch_launch": false},
+    {"id": "heavy_manual", "name": "重度手操", "batch_launch": false}
+  ],
+  "tasks": [
+    {
+      "task": "範例工作",
+      "group_id": "ungrouped",
+      "completion_mode": "daily",
+      "last_completed_at": null,
+      "quick_launch": [
+        {
+          "target": "C:/Path/To/Application.exe",
+          "args": []
+        }
+      ]
+    }
+  ]
+}
