@@ -1,12 +1,16 @@
 {
-  "version": 4,
+  "version": 6,
   "settings": {
-    "auto_hide_after_launch": true
+    "auto_hide_after_launch": true,
+    "density": "comfortable",
+    "panel_width": 460,
+    "show_task_details": true,
+    "ungrouped_collapsed": false
   },
   "groups": [
-    {"id": "background", "name": "背景執行", "batch_launch": true},
-    {"id": "light_manual", "name": "輕量手操", "batch_launch": false},
-    {"id": "heavy_manual", "name": "重度手操", "batch_launch": false}
+    {"id": "background", "name": "背景執行", "icon": "◌", "color": "#78a9ff", "batch_launch": true, "collapsed": false, "rule": "manual"},
+    {"id": "light_manual", "name": "輕量手操", "icon": "☀", "color": "#70c58b", "batch_launch": false, "collapsed": false, "rule": "manual"},
+    {"id": "heavy_manual", "name": "重度手操", "icon": "◆", "color": "#d99559", "batch_launch": false, "collapsed": false, "rule": "manual"}
   ],
   "tasks": [
     {
@@ -17,7 +21,8 @@
       "quick_launch": [
         {
           "target": "C:/Path/To/Application.exe",
-          "args": []
+          "args": [],
+          "focus_existing": false
         }
       ]
     }

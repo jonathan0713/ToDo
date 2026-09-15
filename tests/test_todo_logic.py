@@ -2,7 +2,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 from launcher import LaunchError
-from task_store import DAILY, is_task_complete
+from task_store import AUTO_GROUP_ID, DAILY, is_task_complete
 from todo import TodoApp
 
 
@@ -121,6 +121,101 @@ class WheelInteractionTests(unittest.TestCase):
         app._on_mousewheel(Mock(delta=-120))
 
         app.cards_canvas.yview_scroll.assert_not_called()
+
+
+class TaskReorderingTests(unittest.TestCase):
+    @staticmethod
+    def make_app() -> TodoApp:
+        app = object.__new__(TodoApp)
+        app.data = {
+            "groups": [
+                {"id": "a", "rule": "manual"},
+                {"id": "b", "rule": "manual"},
+            ],
+            "tasks": [
+                {"task": "One", "group_id": "a"},
+                {"task": "Two", "group_id": "a"},
+                {"task": "Three", "group_id": "b"},
+            ]
+        }
+        app._save = Mock(return_value=True)
+        app.update_listbox = Mock()
+        app.show_toast = Mock()
+        return app
+
+    def test_drop_after_task_reorders_within_group(self) -> None:
+        app = self.make_app()
+
+        app._move_task_to_drop_target(0, ("task", 1, "after"))
+
+        self.assertEqual(
+            [task["task"] for task in app.data["tasks"]],
+            ["Two", "One", "Three"],
+        )
+
+    def test_drop_on_task_moves_to_target_group(self) -> None:
+        app = self.make_app()
+
+        app._move_task_to_drop_target(0, ("task", 2, "before"))
+
+        self.assertEqual(app.data["tasks"][1]["task"], "One")
+        self.assertEqual(app.data["tasks"][1]["group_id"], "b")
+
+
+class SmartGroupTests(unittest.TestCase):
+    def test_auto_task_uses_first_matching_rule_without_duplication(self) -> None:
+        app = object.__new__(TodoApp)
+        app.data = {
+            "groups": [
+                {"id": "next", "rule": "unfinished"},
+                {"id": "daily", "rule": "daily"},
+            ]
+        }
+        task = {
+            "group_id": AUTO_GROUP_ID,
+            "completion_mode": DAILY,
+            "last_completed_at": None,
+        }
+
+        self.assertEqual(app._effective_group_id(task), "next")
+
+    def test_manual_group_overrides_smart_rules(self) -> None:
+        app = object.__new__(TodoApp)
+        app.data = {"groups": [{"id": "next", "rule": "unfinished"}]}
+        task = {
+            "group_id": "games",
+            "completion_mode": DAILY,
+            "last_completed_at": None,
+        }
+
+        self.assertEqual(app._effective_group_id(task), "games")
+
+    def test_reordering_auto_peers_keeps_automatic_membership(self) -> None:
+        app = object.__new__(TodoApp)
+        app.data = {
+            "groups": [{"id": "next", "rule": "unfinished"}],
+            "tasks": [
+                {
+                    "task": "One",
+                    "group_id": AUTO_GROUP_ID,
+                    "last_completed_at": None,
+                },
+                {
+                    "task": "Two",
+                    "group_id": AUTO_GROUP_ID,
+                    "last_completed_at": None,
+                },
+            ],
+        }
+        app._save = Mock(return_value=True)
+        app.update_listbox = Mock()
+        app.show_toast = Mock()
+
+        app._move_task_to_drop_target(0, ("task", 1, "after"))
+
+        self.assertTrue(
+            all(task["group_id"] == AUTO_GROUP_ID for task in app.data["tasks"])
+        )
 
 
 if __name__ == "__main__":

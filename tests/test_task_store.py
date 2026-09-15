@@ -6,6 +6,7 @@ from pathlib import Path
 from datetime import datetime, timedelta, timezone
 
 from task_store import (
+    AUTO_GROUP_ID,
     DAILY,
     PERMANENT,
     TaskStore,
@@ -66,8 +67,10 @@ class TaskStoreTests(unittest.TestCase):
             data = TaskStore(destination, legacy).load()
 
             self.assertTrue(destination.exists())
-            self.assertEqual(data["version"], 4)
+            self.assertEqual(data["version"], 6)
             self.assertTrue(data["settings"]["auto_hide_after_launch"])
+            self.assertEqual(data["settings"]["density"], "comfortable")
+            self.assertEqual(data["settings"]["panel_width"], 460)
             self.assertEqual(len(data["groups"]), 3)
             self.assertEqual(data["tasks"][0]["task"], "Example")
             self.assertEqual(data["tasks"][0]["group_id"], UNGROUPED_ID)
@@ -91,7 +94,7 @@ class TaskStoreTests(unittest.TestCase):
             )
 
             saved = json.loads(path.read_text(encoding="utf-8"))
-            self.assertEqual(saved["version"], 4)
+            self.assertEqual(saved["version"], 6)
             self.assertTrue(saved["settings"]["auto_hide_after_launch"])
             self.assertEqual(
                 saved["tasks"][0]["quick_launch"][0],
@@ -118,8 +121,90 @@ class TaskStoreTests(unittest.TestCase):
             saved = json.loads(path.read_text(encoding="utf-8"))
             self.assertEqual(saved["groups"][0]["name"], "早晨流程")
             self.assertTrue(saved["groups"][0]["batch_launch"])
+            self.assertEqual(saved["groups"][0]["icon"], "●")
+            self.assertEqual(saved["groups"][0]["color"], "#78a9ff")
             self.assertEqual(saved["tasks"][0]["group_id"], "morning")
             self.assertEqual(saved["tasks"][1]["group_id"], UNGROUPED_ID)
+
+    def test_appearance_settings_and_group_identity_are_normalized(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "tasks.json"
+            store = TaskStore(path)
+            store.save(
+                {
+                    "settings": {
+                        "density": "compact",
+                        "panel_width": 999,
+                        "show_task_details": False,
+                    },
+                    "groups": [
+                        {
+                            "id": "games",
+                            "name": "遊戲",
+                            "icon": "🎮",
+                            "color": "#ef7f91",
+                            "collapsed": True,
+                        }
+                    ],
+                    "tasks": [],
+                }
+            )
+
+            saved = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(saved["settings"]["density"], "compact")
+            self.assertEqual(saved["settings"]["panel_width"], 620)
+            self.assertFalse(saved["settings"]["show_task_details"])
+            self.assertEqual(saved["groups"][0]["icon"], "🎮")
+            self.assertEqual(saved["groups"][0]["color"], "#ef7f91")
+            self.assertTrue(saved["groups"][0]["collapsed"])
+
+    def test_version_four_default_groups_gain_distinct_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "tasks.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "version": 4,
+                        "groups": [
+                            {
+                                "id": "light_manual",
+                                "name": "輕量手操",
+                                "batch_launch": False,
+                            }
+                        ],
+                        "tasks": [],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            loaded = TaskStore(path).load()
+
+            self.assertEqual(loaded["groups"][0]["icon"], "☀")
+            self.assertEqual(loaded["groups"][0]["color"], "#70c58b")
+
+    def test_auto_group_tasks_and_group_rules_are_preserved(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "tasks.json"
+            store = TaskStore(path)
+            store.save(
+                {
+                    "groups": [
+                        {
+                            "id": "next",
+                            "name": "下一步",
+                            "rule": "unfinished",
+                        }
+                    ],
+                    "tasks": [
+                        {"task": "Automatic", "group_id": AUTO_GROUP_ID}
+                    ],
+                }
+            )
+
+            saved = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(saved["groups"][0]["rule"], "unfinished")
+            self.assertEqual(saved["tasks"][0]["group_id"], AUTO_GROUP_ID)
 
     def test_corrupt_file_is_backed_up(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

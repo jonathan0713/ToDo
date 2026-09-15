@@ -25,6 +25,20 @@ class LauncherTests(unittest.TestCase):
         with self.assertRaisesRegex(LaunchError, "找不到檔案"):
             launch({"target": "Z:/definitely-missing/example.exe", "args": []})
 
+    def test_focuses_existing_executable_without_starting_duplicate(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            executable = Path(directory) / "example.exe"
+            executable.touch()
+
+            with (
+                patch("launcher._focus_existing_window", return_value=True) as focus,
+                patch("launcher.subprocess.Popen") as popen,
+            ):
+                launch({"target": str(executable), "focus_existing": True})
+
+            focus.assert_called_once_with(executable)
+            popen.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

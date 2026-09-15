@@ -11,18 +11,51 @@ from pathlib import Path
 from typing import Any
 
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 6
 DAILY = "daily"
 PERMANENT = "permanent"
 COMPLETION_MODES = {DAILY, PERMANENT}
 _TARGET_PATTERN = re.compile(r"\.(?:exe|com|bat|cmd|lnk|url)\b", re.IGNORECASE)
-DEFAULT_SETTINGS = {"auto_hide_after_launch": True}
+DEFAULT_SETTINGS = {
+    "auto_hide_after_launch": True,
+    "density": "comfortable",
+    "panel_width": 460,
+    "show_task_details": True,
+    "ungrouped_collapsed": False,
+}
 UNGROUPED_ID = "ungrouped"
+AUTO_GROUP_ID = "auto"
+GROUP_RULES = {"manual", "unfinished", "completed", "daily", "permanent"}
 DEFAULT_GROUPS = [
-    {"id": "background", "name": "背景執行", "batch_launch": True},
-    {"id": "light_manual", "name": "輕量手操", "batch_launch": False},
-    {"id": "heavy_manual", "name": "重度手操", "batch_launch": False},
+    {
+        "id": "background",
+        "name": "背景執行",
+        "icon": "◌",
+        "color": "#78a9ff",
+        "batch_launch": True,
+        "collapsed": False,
+        "rule": "manual",
+    },
+    {
+        "id": "light_manual",
+        "name": "輕量手操",
+        "icon": "☀",
+        "color": "#70c58b",
+        "batch_launch": False,
+        "collapsed": False,
+        "rule": "manual",
+    },
+    {
+        "id": "heavy_manual",
+        "name": "重度手操",
+        "icon": "◆",
+        "color": "#d99559",
+        "batch_launch": False,
+        "collapsed": False,
+        "rule": "manual",
+    },
 ]
+_COLOR_PATTERN = re.compile(r"^#[0-9a-fA-F]{6}$")
 
 
 def empty_data() -> dict[str, Any]:
@@ -110,6 +143,7 @@ def normalize_launch_item(raw: Any) -> dict[str, Any] | None:
         args = []
 
     item: dict[str, Any] = {"target": target, "args": args}
+    item["focus_existing"] = bool(raw.get("focus_existing", False))
     cwd = raw.get("cwd")
     if cwd:
         item["cwd"] = str(cwd)
@@ -126,7 +160,22 @@ def normalize_data(raw: Any) -> dict[str, Any]:
     settings = {
         "auto_hide_after_launch": bool(
             raw_settings.get("auto_hide_after_launch", True)
-        )
+        ),
+        "density": (
+            raw_settings.get("density")
+            if raw_settings.get("density") in {"comfortable", "compact"}
+            else DEFAULT_SETTINGS["density"]
+        ),
+        "panel_width": min(
+            620,
+            max(420, int(raw_settings.get("panel_width", 460)))
+            if str(raw_settings.get("panel_width", 460)).isdigit()
+            else DEFAULT_SETTINGS["panel_width"],
+        ),
+        "show_task_details": bool(raw_settings.get("show_task_details", True)),
+        "ungrouped_collapsed": bool(
+            raw_settings.get("ungrouped_collapsed", False)
+        ),
     }
 
     raw_groups = raw.get("groups", DEFAULT_GROUPS)
@@ -149,11 +198,32 @@ def normalize_data(raw: Any) -> dict[str, Any]:
             or normalized_name in group_names
         ):
             continue
+        default_group = next(
+            (group for group in DEFAULT_GROUPS if group["id"] == group_id), {}
+        )
+        default_icon = default_group.get("icon", "●")
+        default_color = default_group.get("color", "#78a9ff")
         groups.append(
             {
                 "id": group_id,
                 "name": name,
+                "icon": (
+                    str(raw_group.get("icon", default_icon)).strip()[:4]
+                    or default_icon
+                ),
+                "color": (
+                    raw_group.get("color")
+                    if isinstance(raw_group.get("color"), str)
+                    and _COLOR_PATTERN.fullmatch(raw_group["color"])
+                    else default_color
+                ),
                 "batch_launch": bool(raw_group.get("batch_launch", False)),
+                "collapsed": bool(raw_group.get("collapsed", False)),
+                "rule": (
+                    raw_group.get("rule")
+                    if raw_group.get("rule") in GROUP_RULES
+                    else "manual"
+                ),
             }
         )
         group_ids.add(group_id)
@@ -190,7 +260,8 @@ def normalize_data(raw: Any) -> dict[str, Any]:
                 "task": name,
                 "group_id": (
                     str(raw_task.get("group_id", UNGROUPED_ID)).strip()
-                    if str(raw_task.get("group_id", UNGROUPED_ID)).strip() in group_ids
+                    if str(raw_task.get("group_id", UNGROUPED_ID)).strip()
+                    in {*group_ids, AUTO_GROUP_ID}
                     else UNGROUPED_ID
                 ),
                 "completion_mode": completion_mode,

@@ -11,11 +11,12 @@ import tkinter as tk
 import uuid
 from datetime import datetime
 from pathlib import Path
-from tkinter import filedialog, messagebox, simpledialog, ttk
+from tkinter import colorchooser, filedialog, messagebox, simpledialog, ttk
 from typing import Any
 
 from launcher import LaunchError, launch
 from task_store import (
+    AUTO_GROUP_ID,
     DAILY,
     PERMANENT,
     TaskStore,
@@ -28,6 +29,22 @@ from task_store import (
 
 APP_NAME = "TodoLauncher"
 MUTEX_NAME = rf"Local\{APP_NAME}-SingleInstance"
+GROUP_COLORS = {
+    "天空藍": "#78a9ff",
+    "薄荷綠": "#70c58b",
+    "暖橙色": "#d99559",
+    "柔紫色": "#b39ddb",
+    "玫瑰紅": "#ef7f91",
+    "中性灰": "#9aa3af",
+}
+PANEL_WIDTHS = {"窄版 · 420": 420, "標準 · 460": 460, "寬版 · 540": 540, "加寬 · 620": 620}
+GROUP_RULE_LABELS = {
+    "手動內容": "manual",
+    "自動 · 未完成": "unfinished",
+    "自動 · 已完成": "completed",
+    "自動 · 每日任務": "daily",
+    "自動 · 永久任務": "permanent",
+}
 
 
 def application_dir() -> Path:
@@ -78,6 +95,13 @@ class TodoApp:
         self.launching_task_index: int | None = None
         self.failed_task_indices: set[int] = set()
         self.visible_task_indices: list[int] = []
+        self.task_cards: dict[int, tk.Frame] = {}
+        self.group_headers: dict[str, tk.Frame] = {}
+        self.drag_task_index: int | None = None
+        self.drag_start: tuple[int, int] | None = None
+        self.drag_moved = False
+        self.drop_target: tuple[str, Any, str | None] | None = None
+        self.drop_highlight: tk.Widget | None = None
         self.toast_window: tk.Toplevel | None = None
         self.tray_icon: Any | None = None
         self.tray_thread: threading.Thread | None = None
@@ -109,7 +133,8 @@ class TodoApp:
         self.work_right = right
         self.work_bottom = bottom
         work_width, work_height = right - left, bottom - top
-        self.window_width = min(max(440, int(work_width * 0.24)), 560)
+        requested_width = self.data["settings"].get("panel_width", 460)
+        self.window_width = min(max(420, requested_width), min(620, work_width))
         self.window_height = min(max(520, int(work_height * 0.65)), 760)
         self.panel_x = right - self.window_width
         self.panel_y = bottom - self.window_height
@@ -206,6 +231,19 @@ class TodoApp:
         y = max(self.work_top, min(preferred_y, self.work_bottom - height))
         return f"{width}x{height}+{x}+{y}"
 
+    def _apply_panel_width(self) -> None:
+        work_width = self.work_right - self.work_left
+        requested = self.data["settings"].get("panel_width", 460)
+        self.window_width = min(max(420, requested), min(620, work_width))
+        self.panel_x = self.work_right - self.window_width
+        if self.visible:
+            self.root.geometry(
+                f"{self.window_width}x{self.window_height}+{self.panel_x}+{self.panel_y}"
+            )
+            self.arrow_window.geometry(
+                f"{self.arrow_width}x{self.arrow_height}+{self.panel_x - self.arrow_width}+{self.panel_y}"
+            )
+
     def _build_ui(self) -> None:
         title_bar = tk.Frame(self.root, bg="#17191d", height=46)
         title_bar.pack(fill=tk.X)
@@ -285,15 +323,15 @@ class TodoApp:
             highlightthickness=0,
             bd=0,
         )
-        scrollbar = ttk.Scrollbar(
+        self.cards_scrollbar = ttk.Scrollbar(
             list_shell,
             orient=tk.VERTICAL,
             command=self.cards_canvas.yview,
             style="Dark.Vertical.TScrollbar",
         )
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.cards_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.cards_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        self.cards_canvas.configure(yscrollcommand=scrollbar.set)
+        self.cards_canvas.configure(yscrollcommand=self._update_scrollbar)
         self.cards_frame = tk.Frame(self.cards_canvas, bg="#202329")
         self.cards_window = self.cards_canvas.create_window(
             (0, 0), window=self.cards_frame, anchor="nw"
@@ -412,6 +450,27 @@ class TodoApp:
             return f"{completed:%m/%d %H:%M} 完成"
         return f"上次 {completed:%m/%d %H:%M}"
 
+    @staticmethod
+    def _matches_group_rule(task: dict[str, Any], rule: str) -> bool:
+        if rule == "unfinished":
+            return not is_task_complete(task)
+        if rule == "completed":
+            return is_task_complete(task)
+        if rule == "daily":
+            return task.get("completion_mode", DAILY) == DAILY
+        if rule == "permanent":
+            return task.get("completion_mode") == PERMANENT
+        return False
+
+    def _effective_group_id(self, task: dict[str, Any]) -> str:
+        group_id = task.get("group_id", UNGROUPED_ID)
+        if group_id != AUTO_GROUP_ID:
+            return group_id
+        for group in self.data["groups"]:
+            if self._matches_group_rule(task, group.get("rule", "manual")):
+                return group["id"]
+        return UNGROUPED_ID
+
     def update_listbox(self, selected_index: int | None = None) -> None:
         if selected_index is not None:
             self.selected_task_index = selected_index
@@ -419,6 +478,8 @@ class TodoApp:
             self.selected_task_index = None
         for child in self.cards_frame.winfo_children():
             child.destroy()
+        self.task_cards = {}
+        self.group_headers = {}
 
         tasks = self.data["tasks"]
         completed_count = sum(is_task_complete(task) for task in tasks)
@@ -437,30 +498,64 @@ class TodoApp:
         display_groups = [*self.data["groups"], {
             "id": UNGROUPED_ID,
             "name": "未分類",
+            "icon": "○",
+            "color": "#7f8a99",
             "batch_launch": False,
+            "collapsed": self.data["settings"].get("ungrouped_collapsed", False),
         }]
         for group in display_groups:
             group_indices = [
                 task_index
                 for task_index, task in enumerate(tasks)
-                if task.get("group_id", UNGROUPED_ID) == group["id"]
+                if self._effective_group_id(task) == group["id"]
             ]
             if not group_indices:
                 continue
             group_indices.sort(
                 key=lambda task_index: (is_task_complete(tasks[task_index]), task_index)
             )
-            self.visible_task_indices.extend(group_indices)
             group_complete = sum(is_task_complete(tasks[index]) for index in group_indices)
-            section = tk.Frame(self.cards_frame, bg="#202329")
+            section = tk.Frame(
+                self.cards_frame,
+                bg="#202329",
+                highlightthickness=1,
+                highlightbackground="#202329",
+            )
+            section._group_id = group["id"]
+            self.group_headers[group["id"]] = section
             section.pack(fill=tk.X, padx=(8, 10), pady=(12, 3))
-            tk.Label(
+            tk.Frame(section, bg=group["color"], width=3, height=20).pack(
+                side=tk.LEFT, padx=(0, 7)
+            )
+            collapsed = bool(group.get("collapsed", False))
+            toggle = tk.Button(
                 section,
-                text=group["name"],
+                text="›" if collapsed else "⌄",
+                command=lambda group_id=group["id"]: self._toggle_group_collapsed(group_id),
+                fg=group["color"],
+                bg="#202329",
+                activebackground="#202329",
+                activeforeground=group["color"],
+                relief=tk.FLAT,
+                bd=0,
+                width=2,
+                font=("Segoe UI Semibold", 11),
+                cursor="hand2",
+            )
+            toggle.pack(side=tk.LEFT)
+            group_label = tk.Label(
+                section,
+                text=f"{group['icon']}  {group['name']}",
                 fg="#dfe3e9",
                 bg="#202329",
                 font=("Segoe UI Semibold", 10),
-            ).pack(side=tk.LEFT)
+                cursor="hand2",
+            )
+            group_label.pack(side=tk.LEFT)
+            group_label.bind(
+                "<Button-1>",
+                lambda _event, group_id=group["id"]: self._toggle_group_collapsed(group_id),
+            )
             if group.get("batch_launch"):
                 tk.Button(
                     section,
@@ -468,9 +563,9 @@ class TodoApp:
                     command=lambda group_id=group["id"]: self.launch_group(group_id),
                     state=tk.DISABLED if self.launching else tk.NORMAL,
                     bg="#292d34",
-                    fg="#78a9ff",
+                    fg=group["color"],
                     activebackground="#343943",
-                    activeforeground="#9cc0ff",
+                    activeforeground=group["color"],
                     relief=tk.FLAT,
                     bd=0,
                     padx=9,
@@ -485,6 +580,9 @@ class TodoApp:
                 bg="#202329",
                 font=("Segoe UI", 9),
             ).pack(side=tk.RIGHT, padx=(0, 9))
+            if collapsed:
+                continue
+            self.visible_task_indices.extend(group_indices)
             for task_index in group_indices:
                 self._render_task_card(task_index)
 
@@ -509,6 +607,8 @@ class TodoApp:
 
     def _render_task_card(self, task_index: int) -> None:
         task = self.data["tasks"][task_index]
+        compact = self.data["settings"].get("density") == "compact"
+        show_details = self.data["settings"].get("show_task_details", True)
         selected = task_index == self.selected_task_index
         complete = is_task_complete(task)
         if task_index == self.launching_task_index:
@@ -528,23 +628,47 @@ class TodoApp:
             highlightbackground="#78a9ff" if selected else "#343a44",
             cursor="hand2",
         )
-        card.pack(fill=tk.X, padx=(6, 8), pady=5)
-        card.grid_columnconfigure(1, weight=1)
+        card._task_index = task_index
+        self.task_cards[task_index] = card
+        card.pack(fill=tk.X, padx=(6, 8), pady=2 if compact else 5)
+        card.grid_columnconfigure(2, weight=1)
+        row_span = 2 if show_details else 1
+        grip = tk.Label(
+            card, text="⋮", fg="#697381", bg=card_bg,
+            font=("Segoe UI Semibold", 11), width=1, cursor="fleur",
+        )
+        grip.grid(
+            row=0, column=0, rowspan=row_span, padx=(5, 0),
+            pady=5 if compact else 10,
+        )
         dot = tk.Label(card, text=marker, fg=accent, bg=card_bg,
-                       font=("Segoe UI", 16), width=2)
-        dot.grid(row=0, column=0, rowspan=2, padx=(10, 4), pady=10)
+                       font=("Segoe UI", 13 if compact else 16), width=2)
+        dot.grid(
+            row=0, column=1, rowspan=row_span,
+            padx=((2, 2) if compact else (3, 4)), pady=5 if compact else 10,
+        )
         title = tk.Label(
             card, text=task["task"], fg="#aeb5c0" if complete else "#f4f6fa",
-            bg=card_bg, font=("Segoe UI Semibold", 12), anchor="w",
+            bg=card_bg, font=("Segoe UI Semibold", 10 if compact else 12), anchor="w",
         )
-        title.grid(row=0, column=1, sticky="ew", pady=(10, 0))
-        mode = "每日" if task["completion_mode"] == DAILY else "永久"
-        meta = tk.Label(
-            card,
-            text=f"{len(task['quick_launch'])} 個啟動項  ·  {mode}  ·  {status}",
-            fg="#9199a6", bg=card_bg, font=("Segoe UI", 9), anchor="w",
+        title.grid(
+            row=0, column=2, sticky="ew",
+            pady=((6, 0) if compact and show_details else ((8, 8) if compact else ((10, 0) if show_details else (13, 13)))),
         )
-        meta.grid(row=1, column=1, sticky="ew", pady=(1, 10))
+        bound_widgets = [card, grip, dot, title]
+        if show_details:
+            mode = "每日" if task["completion_mode"] == DAILY else "永久"
+            meta = tk.Label(
+                card,
+                text=f"{len(task['quick_launch'])} 個啟動項  ·  {mode}  ·  {status}",
+                fg="#9199a6", bg=card_bg,
+                font=("Segoe UI", 8 if compact else 9), anchor="w",
+            )
+            meta.grid(
+                row=1, column=2, sticky="ew",
+                pady=(0, 6) if compact else (1, 10),
+            )
+            bound_widgets.append(meta)
         tk.Button(
             card,
             text="啟動中" if task_index == self.launching_task_index else ("再開" if complete else "啟動"),
@@ -553,17 +677,173 @@ class TodoApp:
             bg="#3b76d8" if not complete else "#3a404a", fg="#ffffff",
             activebackground="#4b86e8", activeforeground="#ffffff",
             disabledforeground="#89909c", relief=tk.FLAT, bd=0,
-            padx=14, pady=7, font=("Segoe UI Semibold", 9), cursor="hand2",
-        ).grid(row=0, column=2, rowspan=2, padx=(8, 4), pady=14)
+            padx=10 if compact else 14, pady=5 if compact else 7,
+            font=("Segoe UI Semibold", 8 if compact else 9), cursor="hand2",
+        ).grid(
+            row=0, column=3, rowspan=row_span, padx=(8, 4),
+            pady=7 if compact else 14,
+        )
         tk.Button(
             card, text="⋯", command=lambda: self._show_task_menu(task_index),
             bg=card_bg, fg="#aeb5c0", activebackground="#3a404a",
             activeforeground="#ffffff", relief=tk.FLAT, bd=0, width=3,
-            font=("Segoe UI Semibold", 12), cursor="hand2",
-        ).grid(row=0, column=3, rowspan=2, padx=(0, 5), pady=14)
-        for widget in (card, dot, title, meta):
-            widget.bind("<Button-1>", lambda _event: self._select_task(task_index))
+            font=("Segoe UI Semibold", 11 if compact else 12), cursor="hand2",
+        ).grid(
+            row=0, column=4, rowspan=row_span, padx=(0, 5),
+            pady=7 if compact else 14,
+        )
+        for widget in bound_widgets:
+            widget.configure(cursor="fleur")
+            widget.bind(
+                "<ButtonPress-1>",
+                lambda event, index=task_index: self._begin_task_drag(index, event),
+            )
+            widget.bind("<B1-Motion>", self._drag_task)
+            widget.bind("<ButtonRelease-1>", self._finish_task_drag)
             widget.bind("<Double-Button-1>", lambda _event: self.launch_task(task_index))
+
+    def _begin_task_drag(self, task_index: int, event: tk.Event) -> None:
+        self.drag_task_index = task_index
+        self.drag_start = (event.x_root, event.y_root)
+        self.drag_moved = False
+        self.drop_target = None
+        self.selected_task_index = task_index
+
+    def _drag_task(self, event: tk.Event) -> None:
+        if self.drag_task_index is None or self.drag_start is None:
+            return
+        if not self.drag_moved:
+            distance = abs(event.x_root - self.drag_start[0]) + abs(
+                event.y_root - self.drag_start[1]
+            )
+            if distance < 8:
+                return
+            self.drag_moved = True
+            self.root.configure(cursor="fleur")
+
+        target = self._drop_target_at(event.x_root, event.y_root)
+        self._show_drop_target(target)
+
+    def _drop_target_at(
+        self, x_root: int, y_root: int
+    ) -> tuple[str, Any, str | None] | None:
+        widget = self.root.winfo_containing(x_root, y_root)
+        while widget is not None:
+            task_index = getattr(widget, "_task_index", None)
+            if task_index is not None and task_index != self.drag_task_index:
+                card = self.task_cards.get(task_index)
+                position = (
+                    "before"
+                    if card and y_root < card.winfo_rooty() + card.winfo_height() / 2
+                    else "after"
+                )
+                return ("task", task_index, position)
+            group_id = getattr(widget, "_group_id", None)
+            if group_id is not None:
+                return ("group", group_id, None)
+            widget = getattr(widget, "master", None)
+        return None
+
+    def _show_drop_target(
+        self, target: tuple[str, Any, str | None] | None
+    ) -> None:
+        if target == self.drop_target:
+            return
+        if self.drop_highlight is not None and self.drop_highlight.winfo_exists():
+            if getattr(self.drop_highlight, "_task_index", None) is not None:
+                index = self.drop_highlight._task_index
+                selected = index == self.selected_task_index
+                self.drop_highlight.configure(
+                    highlightbackground="#78a9ff" if selected else "#343a44"
+                )
+            else:
+                self.drop_highlight.configure(highlightbackground="#202329")
+        self.drop_target = target
+        self.drop_highlight = None
+        if target is None:
+            return
+        kind, value, _position = target
+        widget = (
+            self.task_cards.get(value)
+            if kind == "task"
+            else self.group_headers.get(value)
+        )
+        if widget is not None:
+            widget.configure(highlightbackground="#f2c94c")
+            self.drop_highlight = widget
+
+    def _finish_task_drag(self, _event: tk.Event) -> None:
+        source_index = self.drag_task_index
+        target = self.drop_target
+        moved = self.drag_moved
+        self.root.configure(cursor="")
+        self.drag_task_index = None
+        self.drag_start = None
+        self.drag_moved = False
+        self.drop_target = None
+        self.drop_highlight = None
+        if source_index is None:
+            return
+        if not moved or target is None:
+            self.update_listbox(source_index)
+            return
+        self._move_task_to_drop_target(source_index, target)
+
+    def _move_task_to_drop_target(
+        self, source_index: int, target: tuple[str, Any, str | None]
+    ) -> None:
+        tasks = self.data["tasks"]
+        original_tasks = tasks.copy()
+        original_group_id = tasks[source_index].get("group_id", UNGROUPED_ID)
+        source_task = tasks[source_index]
+        kind, value, position = target
+        if kind == "task":
+            target_task = tasks[value]
+            source_effective_group = self._effective_group_id(source_task)
+            target_effective_group = self._effective_group_id(target_task)
+            both_are_auto_peers = (
+                source_task.get("group_id") == AUTO_GROUP_ID
+                and target_task.get("group_id") == AUTO_GROUP_ID
+                and source_effective_group == target_effective_group
+            )
+            if not both_are_auto_peers:
+                source_task["group_id"] = target_effective_group
+            tasks.pop(source_index)
+            target_index = tasks.index(target_task)
+            insert_at = target_index + (1 if position == "after" else 0)
+        else:
+            source_task["group_id"] = value
+            tasks.pop(source_index)
+            group_positions = [
+                index
+                for index, task in enumerate(tasks)
+                if self._effective_group_id(task) == value
+            ]
+            insert_at = group_positions[-1] + 1 if group_positions else len(tasks)
+        tasks.insert(insert_at, source_task)
+        if self._save():
+            self.selected_task_index = insert_at
+            self.update_listbox(insert_at)
+            self.show_toast("任務順序與群組已更新")
+        else:
+            source_task["group_id"] = original_group_id
+            self.data["tasks"] = original_tasks
+            self.update_listbox(source_index)
+
+    def _toggle_group_collapsed(self, group_id: str) -> None:
+        if group_id == UNGROUPED_ID:
+            key = "ungrouped_collapsed"
+            self.data["settings"][key] = not self.data["settings"].get(key, False)
+        else:
+            group = next(
+                (group for group in self.data["groups"] if group["id"] == group_id),
+                None,
+            )
+            if group is None:
+                return
+            group["collapsed"] = not group.get("collapsed", False)
+        if self._save():
+            self.update_listbox()
 
     def _select_task(self, index: int) -> None:
         self.selected_task_index = index
@@ -590,6 +870,16 @@ class TodoApp:
             return
         direction = -1 if event.delta > 0 else 1
         self.cards_canvas.yview_scroll(direction * 3, "units")
+
+    def _update_scrollbar(self, first: str, last: str) -> None:
+        self.cards_scrollbar.set(first, last)
+        content_fits = float(first) <= 0 and float(last) >= 1
+        if content_fits and self.cards_scrollbar.winfo_manager():
+            self.cards_scrollbar.pack_forget()
+        elif not content_fits and not self.cards_scrollbar.winfo_manager():
+            self.cards_scrollbar.pack(
+                side=tk.RIGHT, fill=tk.Y, before=self.cards_canvas
+            )
 
     def _show_task_menu(self, index: int) -> None:
         self.selected_task_index = index
@@ -708,18 +998,28 @@ class TodoApp:
             bg="#202329",
             font=("Segoe UI Semibold", 9),
         ).grid(row=2, column=0, columnspan=2, sticky="w")
-        group_names = ["未分類", *(group["name"] for group in self.data["groups"])]
+        group_names = [
+            "依規則自動分類",
+            "未分類",
+            *(group["name"] for group in self.data["groups"]),
+        ]
         group_name_to_id = {
+            "依規則自動分類": AUTO_GROUP_ID,
             "未分類": UNGROUPED_ID,
             **{group["name"]: group["id"] for group in self.data["groups"]},
         }
-        current_group = next(
-            (
-                group["name"]
-                for group in self.data["groups"]
-                if group["id"] == working_task.get("group_id", UNGROUPED_ID)
-            ),
-            "未分類",
+        stored_group_id = working_task.get("group_id", UNGROUPED_ID)
+        current_group = (
+            "依規則自動分類"
+            if stored_group_id == AUTO_GROUP_ID
+            else next(
+                (
+                    group["name"]
+                    for group in self.data["groups"]
+                    if group["id"] == stored_group_id
+                ),
+                "未分類",
+            )
         )
         group_var = tk.StringVar(value=current_group)
         group_box = ttk.Combobox(
@@ -773,7 +1073,11 @@ class TodoApp:
                 target = Path(item["target"])
                 args = subprocess.list2cmdline(item.get("args", []))
                 detail = f"  {args}" if args else ""
-                launch_list.insert(tk.END, f"  {target.name}{detail}    —    {target.parent}")
+                behavior = "↩ 已開啟則切回   " if item.get("focus_existing") else ""
+                launch_list.insert(
+                    tk.END,
+                    f"  {behavior}{target.name}{detail}    —    {target.parent}",
+                )
             launch_count_label.configure(
                 text=f"{len(working_task['quick_launch'])} 個項目"
             )
@@ -811,7 +1115,12 @@ class TodoApp:
             )
             if value is not None:
                 normalized = normalize_launch_item(
-                    {"target": item["target"], "args": value, "cwd": item.get("cwd")}
+                    {
+                        "target": item["target"],
+                        "args": value,
+                        "cwd": item.get("cwd"),
+                        "focus_existing": item.get("focus_existing", False),
+                    }
                 )
                 if normalized:
                     working_task["quick_launch"][launch_index] = normalized
@@ -823,6 +1132,23 @@ class TodoApp:
                 return
             launch_index = selection[0]
             del working_task["quick_launch"][launch_index]
+            refresh_launches(launch_index)
+
+        def toggle_focus_existing() -> None:
+            selection = launch_list.curselection()
+            if not selection:
+                return
+            launch_index = selection[0]
+            item = working_task["quick_launch"][launch_index]
+            suffix = Path(item["target"]).suffix.lower()
+            if suffix not in {".exe", ".com"}:
+                messagebox.showinfo(
+                    "切回既有視窗",
+                    "這個選項目前只支援直接選取的 EXE 或 COM 程式。",
+                    parent=dialog,
+                )
+                return
+            item["focus_existing"] = not item.get("focus_existing", False)
             refresh_launches(launch_index)
 
         launch_controls = tk.Frame(content, bg="#202329")
@@ -839,6 +1165,12 @@ class TodoApp:
             command=edit_arguments,
             style="Secondary.TButton",
         ).pack(side=tk.LEFT, padx=6)
+        ttk.Button(
+            launch_controls,
+            text="已開啟則切回",
+            command=toggle_focus_existing,
+            style="Secondary.TButton",
+        ).pack(side=tk.LEFT, padx=(0, 6))
         ttk.Button(
             launch_controls,
             text="移除",
@@ -917,7 +1249,7 @@ class TodoApp:
     def open_settings(self) -> None:
         dialog = tk.Toplevel(self.root)
         dialog.title("設定")
-        dialog.geometry(self._dialog_geometry(600, 540))
+        dialog.geometry(self._dialog_geometry(700, 680))
         dialog.resizable(False, False)
         dialog.transient(self.root)
         dialog.grab_set()
@@ -937,9 +1269,62 @@ class TodoApp:
         auto_hide = tk.BooleanVar(
             value=self.data["settings"].get("auto_hide_after_launch", True)
         )
+        density_labels = {"舒適": "comfortable", "緊湊": "compact"}
+        density_var = tk.StringVar(
+            value="緊湊"
+            if self.data["settings"].get("density") == "compact"
+            else "舒適"
+        )
+        current_width = self.data["settings"].get("panel_width", 460)
+        width_var = tk.StringVar(
+            value=next(
+                (
+                    label
+                    for label, value in PANEL_WIDTHS.items()
+                    if value == current_width
+                ),
+                "標準 · 460",
+            )
+        )
+        show_details = tk.BooleanVar(
+            value=self.data["settings"].get("show_task_details", True)
+        )
         working_groups = copy.deepcopy(self.data["groups"])
         setting_area = tk.Frame(dialog, bg="#202329")
         setting_area.pack(fill=tk.BOTH, expand=True, padx=20, pady=14)
+
+        tk.Label(
+            setting_area,
+            text="外觀與版面",
+            fg="#f4f6fa",
+            bg="#202329",
+            font=("Segoe UI Semibold", 11),
+        ).pack(anchor="w")
+        appearance_row = tk.Frame(setting_area, bg="#202329")
+        appearance_row.pack(fill=tk.X, pady=(8, 10))
+        for title, variable, values, width in (
+            ("資訊密度", density_var, tuple(density_labels), 10),
+            ("面板寬度", width_var, tuple(PANEL_WIDTHS), 14),
+        ):
+            field = tk.Frame(appearance_row, bg="#202329")
+            field.pack(side=tk.LEFT, padx=(0, 14))
+            tk.Label(
+                field, text=title, fg="#aeb5c0", bg="#202329",
+                font=("Segoe UI Semibold", 9),
+            ).pack(anchor="w", pady=(0, 4))
+            ttk.Combobox(
+                field, textvariable=variable, values=values, state="readonly",
+                width=width, style="Dark.TCombobox",
+            ).pack()
+        details_field = tk.Frame(appearance_row, bg="#202329")
+        details_field.pack(side=tk.LEFT, fill=tk.Y)
+        tk.Label(
+            details_field, text="卡片資訊", fg="#aeb5c0", bg="#202329",
+            font=("Segoe UI Semibold", 9),
+        ).pack(anchor="w", pady=(0, 4))
+        ttk.Checkbutton(
+            details_field, text="顯示啟動數與完成時間", variable=show_details,
+        ).pack(anchor="w")
         ttk.Checkbutton(
             setting_area,
             text="成功啟動後自動收合面板",
@@ -990,7 +1375,7 @@ class TodoApp:
         )
         group_list.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        editor = tk.Frame(group_area, bg="#292d34", width=280)
+        editor = tk.Frame(group_area, bg="#292d34", width=330)
         editor.pack(side=tk.LEFT, fill=tk.BOTH, padx=(12, 0))
         editor.pack_propagate(False)
         tk.Label(
@@ -1004,27 +1389,101 @@ class TodoApp:
             relief=tk.FLAT, bd=0, font=("Segoe UI", 11),
         )
         group_entry.pack(fill=tk.X, padx=14, ipady=8)
+        identity_row = tk.Frame(editor, bg="#292d34")
+        identity_row.pack(fill=tk.X, padx=14, pady=(12, 0))
+        icon_field = tk.Frame(identity_row, bg="#292d34")
+        icon_field.pack(side=tk.LEFT, anchor="n")
+        tk.Label(
+            icon_field, text="圖示／符號", fg="#aeb5c0", bg="#292d34",
+            font=("Segoe UI Semibold", 9),
+        ).pack(anchor="w", pady=(0, 5))
+        group_icon = tk.StringVar()
+        icon_entry = tk.Entry(
+            icon_field, textvariable=group_icon, width=8, bg="#17191d",
+            fg="#f4f6fa", insertbackground="#ffffff", selectbackground="#3b76d8",
+            relief=tk.FLAT, bd=0, font=("Segoe UI Emoji", 11), justify=tk.CENTER,
+        )
+        icon_entry.pack(ipady=7)
+        color_field = tk.Frame(identity_row, bg="#292d34")
+        color_field.pack(side=tk.LEFT, anchor="n", padx=(14, 0))
+        tk.Label(
+            color_field, text="強調色", fg="#aeb5c0", bg="#292d34",
+            font=("Segoe UI Semibold", 9),
+        ).pack(anchor="w", pady=(0, 5))
+        group_color = tk.StringVar()
+        color_controls = tk.Frame(color_field, bg="#292d34")
+        color_controls.pack()
+        color_box = ttk.Combobox(
+            color_controls, textvariable=group_color, values=tuple(GROUP_COLORS),
+            state="readonly", width=12, style="Dark.TCombobox",
+        )
+        color_box.pack(side=tk.LEFT)
+        color_swatch = tk.Label(
+            color_controls, bg="#78a9ff", width=2, relief=tk.FLAT, bd=0,
+        )
+        color_swatch.pack(side=tk.LEFT, fill=tk.Y, padx=(5, 0))
+
+        def resolved_group_color() -> str:
+            candidate = GROUP_COLORS.get(group_color.get(), group_color.get())
+            if len(candidate) == 7 and candidate.startswith("#"):
+                try:
+                    int(candidate[1:], 16)
+                    return candidate
+                except ValueError:
+                    pass
+            return "#78a9ff"
+
+        def refresh_color_swatch(_event: tk.Event | None = None) -> None:
+            color_swatch.configure(bg=resolved_group_color())
+
+        def choose_group_color() -> None:
+            _rgb, selected = colorchooser.askcolor(
+                color=resolved_group_color(), title="選擇群組色彩", parent=dialog
+            )
+            if selected:
+                group_color.set(selected)
+                refresh_color_swatch()
+
+        color_box.bind("<<ComboboxSelected>>", refresh_color_swatch)
+        tk.Button(
+            color_field, text="自訂色…", command=choose_group_color,
+            bg="#343943", fg="#d6dae1", activebackground="#414753",
+            activeforeground="#ffffff", relief=tk.FLAT, bd=0,
+            padx=8, pady=4, font=("Segoe UI", 8), cursor="hand2",
+        ).pack(anchor="w", pady=(6, 0))
+        behavior_row = tk.Frame(editor, bg="#292d34")
+        behavior_row.pack(fill=tk.X, padx=10, pady=(10, 0))
         group_batch = tk.BooleanVar()
         ttk.Checkbutton(
-            editor,
-            text="顯示「啟動未完成」按鈕",
+            behavior_row,
+            text="整組啟動",
             variable=group_batch,
             style="Group.TCheckbutton",
-        ).pack(anchor="w", padx=10, pady=(12, 0))
-        tk.Label(
-            editor,
-            text="適合背景程式；一次啟動群組內尚未完成的任務。",
-            fg="#8f98a6", bg="#292d34", font=("Segoe UI", 9),
-            wraplength=235, justify=tk.LEFT,
-        ).pack(anchor="w", padx=14, pady=(5, 0))
+        ).pack(side=tk.LEFT)
+        group_rule = tk.StringVar(value="手動內容")
+        ttk.Combobox(
+            behavior_row,
+            textvariable=group_rule,
+            values=tuple(GROUP_RULE_LABELS),
+            state="readonly",
+            width=15,
+            style="Dark.TCombobox",
+        ).pack(side=tk.RIGHT)
 
         editor_index: int | None = None
 
         def refresh_groups(selected: int | None = None) -> None:
             group_list.delete(0, tk.END)
             for group in working_groups:
-                suffix = "   ·   可整組啟動" if group["batch_launch"] else ""
-                group_list.insert(tk.END, f"  {group['name']}{suffix}")
+                details = []
+                if group["batch_launch"]:
+                    details.append("整組啟動")
+                if group.get("rule", "manual") != "manual":
+                    details.append("自動")
+                suffix = f"   ·   {' / '.join(details)}" if details else ""
+                group_list.insert(
+                    tk.END, f"  {group['icon']}  {group['name']}{suffix}"
+                )
             if selected is not None and working_groups:
                 selected = max(0, min(selected, len(working_groups) - 1))
                 group_list.selection_set(selected)
@@ -1034,7 +1493,27 @@ class TodoApp:
             nonlocal editor_index
             editor_index = index
             group_name.set(working_groups[index]["name"])
+            group_icon.set(working_groups[index].get("icon", "●"))
+            color_value = working_groups[index].get("color", "#78a9ff")
+            group_color.set(
+                next(
+                    (name for name, value in GROUP_COLORS.items() if value == color_value),
+                    color_value,
+                )
+            )
+            refresh_color_swatch()
             group_batch.set(working_groups[index]["batch_launch"])
+            rule_value = working_groups[index].get("rule", "manual")
+            group_rule.set(
+                next(
+                    (
+                        label
+                        for label, value in GROUP_RULE_LABELS.items()
+                        if value == rule_value
+                    ),
+                    "手動內容",
+                )
+            )
 
         def apply_editor(show_warning: bool = True) -> bool:
             if editor_index is None:
@@ -1054,7 +1533,12 @@ class TodoApp:
                     group_entry.focus_set()
                 return False
             working_groups[editor_index]["name"] = name
+            working_groups[editor_index]["icon"] = group_icon.get().strip()[:4] or "●"
+            working_groups[editor_index]["color"] = resolved_group_color()
             working_groups[editor_index]["batch_launch"] = group_batch.get()
+            working_groups[editor_index]["rule"] = GROUP_RULE_LABELS[
+                group_rule.get()
+            ]
             return True
 
         def select_group(_event: tk.Event | None = None) -> None:
@@ -1083,7 +1567,15 @@ class TodoApp:
                 number += 1
                 name = f"新群組 {number}"
             working_groups.append(
-                {"id": uuid.uuid4().hex, "name": name, "batch_launch": False}
+                {
+                    "id": uuid.uuid4().hex,
+                    "name": name,
+                    "icon": "●",
+                    "color": "#78a9ff",
+                    "batch_launch": False,
+                    "collapsed": False,
+                    "rule": "manual",
+                }
             )
             refresh_groups(len(working_groups) - 1)
             load_group(len(working_groups) - 1)
@@ -1104,6 +1596,8 @@ class TodoApp:
             del working_groups[editor_index]
             editor_index = None
             group_name.set("")
+            group_icon.set("")
+            group_color.set("天空藍")
             group_batch.set(False)
             next_index = min(len(working_groups) - 1, group_list.curselection()[0]) if working_groups else None
             refresh_groups(next_index)
@@ -1145,22 +1639,24 @@ class TodoApp:
                 return
             valid_group_ids = {group["id"] for group in working_groups}
             previous_groups = self.data["groups"]
-            previous_auto_hide = self.data["settings"].get(
-                "auto_hide_after_launch", True
-            )
+            previous_settings = copy.deepcopy(self.data["settings"])
             previous_task_groups = [task.get("group_id", UNGROUPED_ID) for task in self.data["tasks"]]
             self.data["settings"]["auto_hide_after_launch"] = auto_hide.get()
+            self.data["settings"]["density"] = density_labels[density_var.get()]
+            self.data["settings"]["panel_width"] = PANEL_WIDTHS[width_var.get()]
+            self.data["settings"]["show_task_details"] = show_details.get()
             self.data["groups"] = working_groups
             for task in self.data["tasks"]:
-                if task.get("group_id") not in valid_group_ids:
+                if task.get("group_id") not in {*valid_group_ids, AUTO_GROUP_ID}:
                     task["group_id"] = UNGROUPED_ID
             if self._save():
+                dialog.destroy()
+                self._apply_panel_width()
                 self.update_listbox()
                 self.show_toast("設定已儲存")
-                dialog.destroy()
             else:
                 self.data["groups"] = previous_groups
-                self.data["settings"]["auto_hide_after_launch"] = previous_auto_hide
+                self.data["settings"] = previous_settings
                 for task, group_id in zip(self.data["tasks"], previous_task_groups):
                     task["group_id"] = group_id
 
@@ -1245,7 +1741,7 @@ class TodoApp:
         indices = [
             index
             for index, task in enumerate(self.data["tasks"])
-            if task.get("group_id", UNGROUPED_ID) == group_id
+            if self._effective_group_id(task) == group_id
             and not is_task_complete(task)
         ]
         if not indices:
