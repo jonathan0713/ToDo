@@ -304,18 +304,9 @@ class TodoApp:
         body.pack(fill=tk.BOTH, expand=True)
 
         summary = tk.Frame(body, bg=COLOR_CANVAS)
-        summary.pack(fill=tk.X, padx=20, pady=(18, 14))
-        self.heading_label = tk.Label(
-            summary,
-            text="今日啟動",
-            fg=COLOR_TEXT,
-            bg=COLOR_CANVAS,
-            font=(UI_FONT_DISPLAY, 20, "bold"),
-            anchor="w",
-        )
-        self.heading_label.pack(anchor="w")
+        summary.pack(fill=tk.X, padx=20, pady=(16, 12))
         summary_row = tk.Frame(summary, bg=COLOR_CANVAS)
-        summary_row.pack(fill=tk.X, pady=(5, 9))
+        summary_row.pack(fill=tk.X, pady=(0, 9))
         self.date_label = tk.Label(
             summary_row,
             fg=COLOR_TEXT_MUTED,
