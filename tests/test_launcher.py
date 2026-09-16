@@ -3,10 +3,22 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from launcher import LaunchError, launch
+from launcher import _application_name, LaunchError, launch, list_running_applications
 
 
 class LauncherTests(unittest.TestCase):
+    def test_application_name_uses_app_suffix_from_window_title(self) -> None:
+        name = _application_name(
+            "README.md - Visual Studio Code",
+            Path("C:/Program Files/Microsoft VS Code/Code.exe"),
+        )
+
+        self.assertEqual(name, "Visual Studio Code")
+
+    def test_running_application_scan_is_empty_outside_windows(self) -> None:
+        with patch("launcher.os.name", "posix"):
+            self.assertEqual(list_running_applications(), [])
+
     def test_executable_uses_argument_list_without_shell(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             executable = Path(directory) / "example.exe"

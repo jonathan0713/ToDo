@@ -3,6 +3,7 @@ from __future__ import annotations
 import ctypes
 import os
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +12,104 @@ from task_store import normalize_launch_item
 
 class LaunchError(RuntimeError):
     pass
+
+
+@dataclass(frozen=True, slots=True)
+class RunningApplication:
+    name: str
+    title: str
+    path: str
+
+
+def _application_name(window_title: str, executable: Path) -> str:
+    """Choose a stable, human-readable name from a top-level window."""
+    for separator in (" - ", " — ", " – "):
+        if separator in window_title:
+            candidate = window_title.rsplit(separator, 1)[-1].strip()
+            if candidate and len(candidate) <= 60:
+                return candidate
+    title = window_title.strip()
+    if title and len(title) <= 60:
+        return title
+    return executable.stem.replace("_", " ").replace("-", " ").strip()
+
+
+def list_running_applications() -> list[RunningApplication]:
+    """Return visible Windows applications, deduplicated by executable path."""
+    if os.name != "nt":
+        return []
+
+    from ctypes import wintypes
+
+    user32 = ctypes.windll.user32
+    kernel32 = ctypes.windll.kernel32
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel32.QueryFullProcessImageNameW.restype = wintypes.BOOL
+    kernel32.QueryFullProcessImageNameW.argtypes = [
+        wintypes.HANDLE,
+        wintypes.DWORD,
+        wintypes.LPWSTR,
+        ctypes.POINTER(wintypes.DWORD),
+    ]
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    process_query_limited_information = 0x1000
+    current_process_id = os.getpid()
+    applications: dict[str, RunningApplication] = {}
+    enum_callback = ctypes.WINFUNCTYPE(
+        wintypes.BOOL, wintypes.HWND, wintypes.LPARAM
+    )
+
+    @enum_callback
+    def inspect_window(window: int, _parameter: int) -> bool:
+        if not user32.IsWindowVisible(window):
+            return True
+        title_length = user32.GetWindowTextLengthW(window)
+        if title_length == 0:
+            return True
+
+        process_id = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(window, ctypes.byref(process_id))
+        if process_id.value == current_process_id:
+            return True
+        process = kernel32.OpenProcess(
+            process_query_limited_information, False, process_id.value
+        )
+        if not process:
+            return True
+        try:
+            size = wintypes.DWORD(32768)
+            path_buffer = ctypes.create_unicode_buffer(size.value)
+            if not kernel32.QueryFullProcessImageNameW(
+                process, 0, path_buffer, ctypes.byref(size)
+            ):
+                return True
+        finally:
+            kernel32.CloseHandle(process)
+
+        title_buffer = ctypes.create_unicode_buffer(title_length + 1)
+        if not user32.GetWindowTextW(window, title_buffer, title_length + 1):
+            return True
+        title = title_buffer.value.strip()
+        executable = Path(path_buffer.value)
+        if not title or executable.suffix.lower() not in {".exe", ".com"}:
+            return True
+        key = os.path.normcase(str(executable))
+        applications.setdefault(
+            key,
+            RunningApplication(
+                name=_application_name(title, executable),
+                title=title,
+                path=str(executable),
+            ),
+        )
+        return True
+
+    user32.EnumWindows(inspect_window, 0)
+    return sorted(
+        applications.values(),
+        key=lambda application: (application.name.casefold(), application.title.casefold()),
+    )
 
 
 def _focus_existing_window(target: Path) -> bool:

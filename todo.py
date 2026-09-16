@@ -14,7 +14,7 @@ from pathlib import Path
 from tkinter import colorchooser, filedialog, messagebox, simpledialog, ttk
 from typing import Any
 
-from launcher import LaunchError, launch
+from launcher import LaunchError, RunningApplication, launch, list_running_applications
 from task_store import (
     AUTO_GROUP_ID,
     DAILY,
@@ -29,6 +29,28 @@ from task_store import (
 
 APP_NAME = "TodoLauncher"
 MUTEX_NAME = rf"Local\{APP_NAME}-SingleInstance"
+UI_FONT = "Microsoft JhengHei UI"
+UI_FONT_DISPLAY = "Microsoft JhengHei UI"
+UI_FONT_ICON = "Segoe UI Symbol"
+
+# Neutral-first dark theme inspired by Fluent's semantic color roles. Accent and
+# status colors are deliberately reserved for actions, selection, and feedback.
+COLOR_CHROME = "#0e1014"
+COLOR_CANVAS = "#13161b"
+COLOR_SURFACE = "#191d24"
+COLOR_SURFACE_RAISED = "#20252e"
+COLOR_SURFACE_HOVER = "#282e39"
+COLOR_BORDER = "#2c323d"
+COLOR_BORDER_STRONG = "#3a4250"
+COLOR_TEXT = "#f2f4f7"
+COLOR_TEXT_SECONDARY = "#aab2bf"
+COLOR_TEXT_MUTED = "#7e8897"
+COLOR_ACCENT = "#8191f7"
+COLOR_ACCENT_HOVER = "#91a0ff"
+COLOR_ACCENT_SUBTLE = "#29304a"
+COLOR_SUCCESS = "#66c990"
+COLOR_WARNING = "#e3b762"
+COLOR_DANGER = "#ed777f"
 GROUP_COLORS = {
     "天空藍": "#78a9ff",
     "薄荷綠": "#70c58b",
@@ -124,7 +146,7 @@ class TodoApp:
     def _configure_window(self) -> None:
         self.root.title("TodoLauncher")
         self.root.overrideredirect(True)
-        self.root.configure(bg="#17191d")
+        self.root.configure(bg=COLOR_CHROME)
         self.root.protocol("WM_DELETE_WINDOW", self.hide_window)
 
         left, top, right, bottom = self._work_area()
@@ -147,65 +169,66 @@ class TodoApp:
         style.theme_use("clam")
         style.configure(
             "Secondary.TButton",
-            background="#292d34",
-            foreground="#f2f4f8",
-            bordercolor="#292d34",
+            background=COLOR_SURFACE_RAISED,
+            foreground=COLOR_TEXT,
+            bordercolor=COLOR_BORDER,
             borderwidth=0,
             relief="flat",
             padding=(14, 8),
-            font=("Segoe UI", 10),
+            font=(UI_FONT, 10),
         )
         style.map(
             "Secondary.TButton",
-            background=[("active", "#343943")],
-            foreground=[("disabled", "#737984")],
+            background=[("active", COLOR_SURFACE_HOVER)],
+            foreground=[("disabled", COLOR_TEXT_MUTED)],
         )
         style.configure(
             "TCheckbutton",
-            background="#202329",
-            foreground="#f2f4f8",
-            font=("Segoe UI", 10),
+            background=COLOR_CANVAS,
+            foreground=COLOR_TEXT,
+            font=(UI_FONT, 10),
         )
         style.configure(
             "Group.TCheckbutton",
-            background="#292d34",
-            foreground="#f2f4f8",
-            font=("Segoe UI", 10),
+            background=COLOR_SURFACE_RAISED,
+            foreground=COLOR_TEXT,
+            font=(UI_FONT, 10),
         )
         style.configure(
             "Daily.Horizontal.TProgressbar",
-            troughcolor="#343943",
-            background="#4b82e6",
-            bordercolor="#343943",
-            lightcolor="#4b82e6",
-            darkcolor="#4b82e6",
-            thickness=6,
+            troughcolor=COLOR_BORDER,
+            background=COLOR_ACCENT,
+            bordercolor=COLOR_BORDER,
+            lightcolor=COLOR_ACCENT,
+            darkcolor=COLOR_ACCENT,
+            thickness=4,
         )
         style.configure(
             "Dark.Vertical.TScrollbar",
-            troughcolor="#202329",
-            background="#464d59",
-            bordercolor="#202329",
-            arrowcolor="#aeb5c0",
-            lightcolor="#464d59",
-            darkcolor="#464d59",
-            width=9,
+            troughcolor=COLOR_CANVAS,
+            background=COLOR_BORDER_STRONG,
+            bordercolor=COLOR_CANVAS,
+            arrowcolor=COLOR_TEXT_SECONDARY,
+            lightcolor=COLOR_BORDER_STRONG,
+            darkcolor=COLOR_BORDER_STRONG,
+            width=8,
         )
         style.configure(
             "Dark.TCombobox",
-            fieldbackground="#17191d",
-            background="#292d34",
-            foreground="#f4f6fa",
-            arrowcolor="#aeb5c0",
-            bordercolor="#3a414d",
+            fieldbackground=COLOR_SURFACE,
+            background=COLOR_SURFACE_RAISED,
+            foreground=COLOR_TEXT,
+            arrowcolor=COLOR_TEXT_SECONDARY,
+            bordercolor=COLOR_BORDER_STRONG,
             padding=6,
+            font=(UI_FONT, 10),
         )
         style.map(
             "Dark.TCombobox",
-            fieldbackground=[("readonly", "#17191d")],
-            foreground=[("readonly", "#f4f6fa")],
-            selectbackground=[("readonly", "#17191d")],
-            selectforeground=[("readonly", "#f4f6fa")],
+            fieldbackground=[("readonly", COLOR_SURFACE)],
+            foreground=[("readonly", COLOR_TEXT)],
+            selectbackground=[("readonly", COLOR_SURFACE)],
+            selectforeground=[("readonly", COLOR_TEXT)],
         )
 
     @staticmethod
@@ -245,7 +268,7 @@ class TodoApp:
             )
 
     def _build_ui(self) -> None:
-        title_bar = tk.Frame(self.root, bg="#17191d", height=46)
+        title_bar = tk.Frame(self.root, bg=COLOR_CHROME, height=44)
         title_bar.pack(fill=tk.X)
         title_bar.pack_propagate(False)
         title_bar.bind("<Button-1>", self._start_move)
@@ -253,11 +276,11 @@ class TodoApp:
 
         title_label = tk.Label(
             title_bar,
-            text="TODAY",
-            fg="#8b95a5",
-            bg="#17191d",
+            text="TodoLauncher",
+            fg=COLOR_TEXT_MUTED,
+            bg=COLOR_CHROME,
             anchor="w",
-            font=("Segoe UI Semibold", 9),
+            font=(UI_FONT, 9, "bold"),
         )
         title_label.pack(side=tk.LEFT, padx=18, fill=tk.Y)
         title_label.bind("<Button-1>", self._start_move)
@@ -267,44 +290,44 @@ class TodoApp:
             title_bar,
             text="×",
             command=self.hide_window,
-            fg="#aeb5c0",
-            bg="#17191d",
-            activebackground="#292d34",
-            activeforeground="white",
+            fg=COLOR_TEXT_SECONDARY,
+            bg=COLOR_CHROME,
+            activebackground=COLOR_SURFACE_RAISED,
+            activeforeground=COLOR_TEXT,
             bd=0,
             width=5,
-            font=("Segoe UI", 13),
+            font=(UI_FONT_ICON, 13),
             cursor="hand2",
         ).pack(side=tk.RIGHT, fill=tk.Y)
 
-        body = tk.Frame(self.root, bg="#202329")
+        body = tk.Frame(self.root, bg=COLOR_CANVAS)
         body.pack(fill=tk.BOTH, expand=True)
 
-        summary = tk.Frame(body, bg="#202329")
-        summary.pack(fill=tk.X, padx=20, pady=(16, 12))
+        summary = tk.Frame(body, bg=COLOR_CANVAS)
+        summary.pack(fill=tk.X, padx=20, pady=(18, 14))
         self.heading_label = tk.Label(
             summary,
             text="今日啟動",
-            fg="#f4f6fa",
-            bg="#202329",
-            font=("Segoe UI Semibold", 22),
+            fg=COLOR_TEXT,
+            bg=COLOR_CANVAS,
+            font=(UI_FONT_DISPLAY, 20, "bold"),
             anchor="w",
         )
         self.heading_label.pack(anchor="w")
-        summary_row = tk.Frame(summary, bg="#202329")
-        summary_row.pack(fill=tk.X, pady=(4, 8))
+        summary_row = tk.Frame(summary, bg=COLOR_CANVAS)
+        summary_row.pack(fill=tk.X, pady=(5, 9))
         self.date_label = tk.Label(
             summary_row,
-            fg="#929aa7",
-            bg="#202329",
-            font=("Segoe UI", 10),
+            fg=COLOR_TEXT_MUTED,
+            bg=COLOR_CANVAS,
+            font=(UI_FONT, 9),
         )
         self.date_label.pack(side=tk.LEFT)
         self.progress_label = tk.Label(
             summary_row,
-            fg="#78a9ff",
-            bg="#202329",
-            font=("Segoe UI Semibold", 10),
+            fg=COLOR_ACCENT,
+            bg=COLOR_CANVAS,
+            font=(UI_FONT, 9, "bold"),
         )
         self.progress_label.pack(side=tk.RIGHT)
         self.progress = ttk.Progressbar(
@@ -315,11 +338,11 @@ class TodoApp:
         )
         self.progress.pack(fill=tk.X)
 
-        list_shell = tk.Frame(body, bg="#202329")
+        list_shell = tk.Frame(body, bg=COLOR_CANVAS)
         list_shell.pack(fill=tk.BOTH, expand=True, padx=(14, 8))
         self.cards_canvas = tk.Canvas(
             list_shell,
-            bg="#202329",
+            bg=COLOR_CANVAS,
             highlightthickness=0,
             bd=0,
         )
@@ -332,7 +355,7 @@ class TodoApp:
         self.cards_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.cards_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         self.cards_canvas.configure(yscrollcommand=self._update_scrollbar)
-        self.cards_frame = tk.Frame(self.cards_canvas, bg="#202329")
+        self.cards_frame = tk.Frame(self.cards_canvas, bg=COLOR_CANVAS)
         self.cards_window = self.cards_canvas.create_window(
             (0, 0), window=self.cards_frame, anchor="nw"
         )
@@ -352,36 +375,51 @@ class TodoApp:
         # buttons, the header, and empty space—not only over the scrollbar.
         self.root.bind("<MouseWheel>", self._on_mousewheel, add="+")
 
-        footer = tk.Frame(body, bg="#202329")
-        footer.pack(fill=tk.X, padx=20, pady=(12, 18))
+        footer = tk.Frame(body, bg=COLOR_CANVAS)
+        footer.pack(fill=tk.X, padx=20, pady=(12, 16))
         tk.Button(
             footer,
             text="＋  新增任務",
             command=self.add_task,
-            bg="#3b76d8",
-            fg="white",
-            activebackground="#4b86e8",
-            activeforeground="white",
+            bg=COLOR_ACCENT,
+            fg=COLOR_CHROME,
+            activebackground=COLOR_ACCENT_HOVER,
+            activeforeground=COLOR_CHROME,
             relief=tk.FLAT,
             bd=0,
             padx=16,
             pady=8,
-            font=("Segoe UI Semibold", 10),
+            font=(UI_FONT, 10, "bold"),
             cursor="hand2",
         ).pack(side=tk.LEFT)
         tk.Button(
             footer,
-            text="設定",
-            command=self.open_settings,
-            bg="#292d34",
-            fg="#d6dae1",
-            activebackground="#343943",
-            activeforeground="white",
+            text="從執行中新增",
+            command=self.add_running_app_task,
+            bg=COLOR_SURFACE_RAISED,
+            fg=COLOR_TEXT_SECONDARY,
+            activebackground=COLOR_SURFACE_HOVER,
+            activeforeground=COLOR_TEXT,
             relief=tk.FLAT,
             bd=0,
-            padx=18,
+            padx=14,
             pady=8,
-            font=("Segoe UI", 10),
+            font=(UI_FONT, 9),
+            cursor="hand2",
+        ).pack(side=tk.LEFT, padx=(8, 0))
+        tk.Button(
+            footer,
+            text="設定",
+            command=self.open_settings,
+            bg=COLOR_CANVAS,
+            fg=COLOR_TEXT_MUTED,
+            activebackground=COLOR_SURFACE_HOVER,
+            activeforeground=COLOR_TEXT,
+            relief=tk.FLAT,
+            bd=0,
+            padx=12,
+            pady=8,
+            font=(UI_FONT, 9),
             cursor="hand2",
         ).pack(side=tk.RIGHT)
 
@@ -404,17 +442,26 @@ class TodoApp:
             self.arrow_window,
             command=self.toggle_window,
             text="‹",
-            bg="#202329",
-            fg="#aeb5c0",
-            activebackground="#2f343d",
-            activeforeground="white",
+            bg=COLOR_CANVAS,
+            fg=COLOR_TEXT_SECONDARY,
+            activebackground=COLOR_SURFACE_HOVER,
+            activeforeground=COLOR_TEXT,
             relief=tk.FLAT,
             bd=0,
-            font=("Segoe UI Light", 24),
+            font=(UI_FONT_ICON, 24),
             cursor="hand2",
         )
         self.arrow_button.pack(fill=tk.BOTH, expand=True)
-        self.arrow_menu = tk.Menu(self.arrow_window, tearoff=False)
+        self.arrow_menu = tk.Menu(
+            self.arrow_window,
+            tearoff=False,
+            bg=COLOR_SURFACE_RAISED,
+            fg=COLOR_TEXT_SECONDARY,
+            activebackground=COLOR_ACCENT_SUBTLE,
+            activeforeground=COLOR_TEXT,
+            bd=0,
+            font=(UI_FONT, 9),
+        )
         self.arrow_menu.add_command(label="顯示視窗", command=self.show_window)
         self.arrow_menu.add_separator()
         self.arrow_menu.add_command(label="退出", command=self.exit_app)
@@ -517,9 +564,9 @@ class TodoApp:
             group_complete = sum(is_task_complete(tasks[index]) for index in group_indices)
             section = tk.Frame(
                 self.cards_frame,
-                bg="#202329",
+                bg=COLOR_CANVAS,
                 highlightthickness=1,
-                highlightbackground="#202329",
+                highlightbackground=COLOR_CANVAS,
             )
             section._group_id = group["id"]
             self.group_headers[group["id"]] = section
@@ -533,22 +580,22 @@ class TodoApp:
                 text="›" if collapsed else "⌄",
                 command=lambda group_id=group["id"]: self._toggle_group_collapsed(group_id),
                 fg=group["color"],
-                bg="#202329",
-                activebackground="#202329",
+                bg=COLOR_CANVAS,
+                activebackground=COLOR_CANVAS,
                 activeforeground=group["color"],
                 relief=tk.FLAT,
                 bd=0,
                 width=2,
-                font=("Segoe UI Semibold", 11),
+                font=(UI_FONT_ICON, 11),
                 cursor="hand2",
             )
             toggle.pack(side=tk.LEFT)
             group_label = tk.Label(
                 section,
                 text=f"{group['icon']}  {group['name']}",
-                fg="#dfe3e9",
-                bg="#202329",
-                font=("Segoe UI Semibold", 10),
+                fg=COLOR_TEXT_SECONDARY,
+                bg=COLOR_CANVAS,
+                font=(UI_FONT, 10, "bold"),
                 cursor="hand2",
             )
             group_label.pack(side=tk.LEFT)
@@ -562,23 +609,23 @@ class TodoApp:
                     text="啟動未完成",
                     command=lambda group_id=group["id"]: self.launch_group(group_id),
                     state=tk.DISABLED if self.launching else tk.NORMAL,
-                    bg="#292d34",
+                    bg=COLOR_SURFACE,
                     fg=group["color"],
-                    activebackground="#343943",
+                    activebackground=COLOR_SURFACE_HOVER,
                     activeforeground=group["color"],
                     relief=tk.FLAT,
                     bd=0,
                     padx=9,
                     pady=3,
-                    font=("Segoe UI Semibold", 8),
+                    font=(UI_FONT, 8, "bold"),
                     cursor="hand2",
                 ).pack(side=tk.RIGHT)
             tk.Label(
                 section,
                 text=f"{group_complete}/{len(group_indices)}",
-                fg="#858e9b",
-                bg="#202329",
-                font=("Segoe UI", 9),
+                fg=COLOR_TEXT_MUTED,
+                bg=COLOR_CANVAS,
+                font=(UI_FONT, 9),
             ).pack(side=tk.RIGHT, padx=(0, 9))
             if collapsed:
                 continue
@@ -587,21 +634,21 @@ class TodoApp:
                 self._render_task_card(task_index)
 
         if not tasks:
-            empty = tk.Frame(self.cards_frame, bg="#292d34")
+            empty = tk.Frame(self.cards_frame, bg=COLOR_SURFACE)
             empty.pack(fill=tk.BOTH, expand=True, padx=(6, 8), pady=6)
             tk.Label(
                 empty,
                 text="今天還沒有任務",
-                fg="#f4f6fa",
-                bg="#292d34",
-                font=("Segoe UI Semibold", 15),
+                fg=COLOR_TEXT,
+                bg=COLOR_SURFACE,
+                font=(UI_FONT_DISPLAY, 15, "bold"),
             ).pack(pady=(60, 6))
             tk.Label(
                 empty,
                 text="建立第一個每日啟動項目，之後只要按一次「啟動」。",
-                fg="#9199a6",
-                bg="#292d34",
-                font=("Segoe UI", 10),
+                fg=COLOR_TEXT_MUTED,
+                bg=COLOR_SURFACE,
+                font=(UI_FONT, 10),
                 wraplength=320,
             ).pack(pady=(0, 60))
 
@@ -612,20 +659,20 @@ class TodoApp:
         selected = task_index == self.selected_task_index
         complete = is_task_complete(task)
         if task_index == self.launching_task_index:
-            marker, accent, status = "●", "#f2c94c", "正在啟動…"
+            marker, accent, status = "●", COLOR_WARNING, "正在啟動…"
         elif task_index in self.failed_task_indices:
-            marker, accent, status = "●", "#ff7b72", "啟動失敗"
+            marker, accent, status = "●", COLOR_DANGER, "啟動失敗"
         elif complete:
-            marker, accent, status = "●", "#70c58b", self._status_text(task)
+            marker, accent, status = "●", COLOR_SUCCESS, self._status_text(task)
         else:
-            marker, accent, status = "○", "#7f8a99", self._status_text(task)
+            marker, accent, status = "○", COLOR_TEXT_MUTED, self._status_text(task)
 
-        card_bg = "#303641" if selected else "#292d34"
+        card_bg = COLOR_ACCENT_SUBTLE if selected else COLOR_SURFACE
         card = tk.Frame(
             self.cards_frame,
             bg=card_bg,
             highlightthickness=1,
-            highlightbackground="#78a9ff" if selected else "#343a44",
+            highlightbackground=COLOR_ACCENT if selected else COLOR_BORDER,
             cursor="hand2",
         )
         card._task_index = task_index
@@ -634,22 +681,25 @@ class TodoApp:
         card.grid_columnconfigure(2, weight=1)
         row_span = 2 if show_details else 1
         grip = tk.Label(
-            card, text="⋮", fg="#697381", bg=card_bg,
-            font=("Segoe UI Semibold", 11), width=1, cursor="fleur",
+            card, text="⋮", fg=COLOR_TEXT_MUTED, bg=card_bg,
+            font=(UI_FONT_ICON, 11), width=1, cursor="fleur",
         )
         grip.grid(
             row=0, column=0, rowspan=row_span, padx=(5, 0),
             pady=5 if compact else 10,
         )
         dot = tk.Label(card, text=marker, fg=accent, bg=card_bg,
-                       font=("Segoe UI", 13 if compact else 16), width=2)
+                       font=(UI_FONT_ICON, 13 if compact else 16), width=2)
         dot.grid(
             row=0, column=1, rowspan=row_span,
             padx=((2, 2) if compact else (3, 4)), pady=5 if compact else 10,
         )
         title = tk.Label(
-            card, text=task["task"], fg="#aeb5c0" if complete else "#f4f6fa",
-            bg=card_bg, font=("Segoe UI Semibold", 10 if compact else 12), anchor="w",
+            card, text=task["task"],
+            fg=COLOR_TEXT_SECONDARY if complete else COLOR_TEXT,
+            bg=card_bg,
+            font=(UI_FONT, 10 if compact else 11, "bold"),
+            anchor="w",
         )
         title.grid(
             row=0, column=2, sticky="ew",
@@ -661,8 +711,8 @@ class TodoApp:
             meta = tk.Label(
                 card,
                 text=f"{len(task['quick_launch'])} 個啟動項  ·  {mode}  ·  {status}",
-                fg="#9199a6", bg=card_bg,
-                font=("Segoe UI", 8 if compact else 9), anchor="w",
+                fg=COLOR_TEXT_MUTED, bg=card_bg,
+                font=(UI_FONT, 8 if compact else 9), anchor="w",
             )
             meta.grid(
                 row=1, column=2, sticky="ew",
@@ -674,20 +724,23 @@ class TodoApp:
             text="啟動中" if task_index == self.launching_task_index else ("再開" if complete else "啟動"),
             command=lambda: self.launch_task(task_index),
             state=tk.DISABLED if self.launching else tk.NORMAL,
-            bg="#3b76d8" if not complete else "#3a404a", fg="#ffffff",
-            activebackground="#4b86e8", activeforeground="#ffffff",
-            disabledforeground="#89909c", relief=tk.FLAT, bd=0,
+            bg=COLOR_ACCENT if not complete else COLOR_SURFACE_RAISED,
+            fg=COLOR_CHROME if not complete else COLOR_TEXT_SECONDARY,
+            activebackground=COLOR_ACCENT_HOVER,
+            activeforeground=COLOR_CHROME,
+            disabledforeground=COLOR_TEXT_MUTED, relief=tk.FLAT, bd=0,
             padx=10 if compact else 14, pady=5 if compact else 7,
-            font=("Segoe UI Semibold", 8 if compact else 9), cursor="hand2",
+            font=(UI_FONT, 8 if compact else 9, "bold"), cursor="hand2",
         ).grid(
             row=0, column=3, rowspan=row_span, padx=(8, 4),
             pady=7 if compact else 14,
         )
         tk.Button(
             card, text="⋯", command=lambda: self._show_task_menu(task_index),
-            bg=card_bg, fg="#aeb5c0", activebackground="#3a404a",
-            activeforeground="#ffffff", relief=tk.FLAT, bd=0, width=3,
-            font=("Segoe UI Semibold", 11 if compact else 12), cursor="hand2",
+            bg=card_bg, fg=COLOR_TEXT_MUTED,
+            activebackground=COLOR_SURFACE_HOVER,
+            activeforeground=COLOR_TEXT, relief=tk.FLAT, bd=0, width=3,
+            font=(UI_FONT_ICON, 11 if compact else 12), cursor="hand2",
         ).grid(
             row=0, column=4, rowspan=row_span, padx=(0, 5),
             pady=7 if compact else 14,
@@ -754,10 +807,10 @@ class TodoApp:
                 index = self.drop_highlight._task_index
                 selected = index == self.selected_task_index
                 self.drop_highlight.configure(
-                    highlightbackground="#78a9ff" if selected else "#343a44"
+                    highlightbackground=COLOR_ACCENT if selected else COLOR_BORDER
                 )
             else:
-                self.drop_highlight.configure(highlightbackground="#202329")
+                self.drop_highlight.configure(highlightbackground=COLOR_CANVAS)
         self.drop_target = target
         self.drop_highlight = None
         if target is None:
@@ -769,7 +822,7 @@ class TodoApp:
             else self.group_headers.get(value)
         )
         if widget is not None:
-            widget.configure(highlightbackground="#f2c94c")
+            widget.configure(highlightbackground=COLOR_WARNING)
             self.drop_highlight = widget
 
     def _finish_task_drag(self, _event: tk.Event) -> None:
@@ -884,7 +937,16 @@ class TodoApp:
     def _show_task_menu(self, index: int) -> None:
         self.selected_task_index = index
         task = self.data["tasks"][index]
-        menu = tk.Menu(self.root, tearoff=False)
+        menu = tk.Menu(
+            self.root,
+            tearoff=False,
+            bg=COLOR_SURFACE_RAISED,
+            fg=COLOR_TEXT_SECONDARY,
+            activebackground=COLOR_ACCENT_SUBTLE,
+            activeforeground=COLOR_TEXT,
+            bd=0,
+            font=(UI_FONT, 9),
+        )
         menu.add_command(label="立即啟動", command=lambda: self.launch_task(index))
         menu.add_separator()
         menu.add_command(label="編輯任務與啟動項", command=lambda: self.edit_task(index))
@@ -905,6 +967,213 @@ class TodoApp:
     def add_task(self) -> None:
         self._open_task_editor()
 
+    def add_running_app_task(self) -> None:
+        self._open_running_app_picker()
+
+    def _open_running_app_picker(self) -> None:
+        dialog = tk.Toplevel(self.root)
+        dialog.title("從執行中程式新增")
+        dialog.geometry(self._dialog_geometry(660, 520))
+        dialog.minsize(520, 420)
+        dialog.transient(self.root)
+        dialog.grab_set()
+        dialog.configure(bg=COLOR_CANVAS)
+
+        header = tk.Frame(dialog, bg=COLOR_CHROME, height=72)
+        header.pack(fill=tk.X)
+        header.pack_propagate(False)
+        title_block = tk.Frame(header, bg=COLOR_CHROME)
+        title_block.pack(side=tk.LEFT, padx=20, fill=tk.Y)
+        tk.Label(
+            title_block,
+            text="選擇執行中的程式",
+            fg=COLOR_TEXT,
+            bg=COLOR_CHROME,
+            font=(UI_FONT_DISPLAY, 17, "bold"),
+            anchor="w",
+        ).pack(anchor="w", pady=(10, 0))
+        tk.Label(
+            title_block,
+            text="只顯示目前有可見視窗、且能取得執行檔路徑的程式",
+            fg=COLOR_TEXT_MUTED,
+            bg=COLOR_CHROME,
+            font=(UI_FONT, 9),
+            anchor="w",
+        ).pack(anchor="w")
+
+        body = tk.Frame(dialog, bg=COLOR_CANVAS)
+        body.pack(fill=tk.BOTH, expand=True, padx=20, pady=16)
+
+        search_row = tk.Frame(body, bg=COLOR_CANVAS)
+        search_row.pack(fill=tk.X, pady=(0, 10))
+        search_var = tk.StringVar()
+        search_entry = tk.Entry(
+            search_row,
+            textvariable=search_var,
+            bg=COLOR_SURFACE,
+            fg=COLOR_TEXT,
+            insertbackground=COLOR_TEXT,
+            selectbackground=COLOR_ACCENT_SUBTLE,
+            relief=tk.FLAT,
+            bd=0,
+            font=(UI_FONT, 10),
+        )
+        search_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, ipady=8)
+
+        list_frame = tk.Frame(body, bg=COLOR_CANVAS)
+        list_frame.pack(fill=tk.BOTH, expand=True)
+        app_list = tk.Listbox(
+            list_frame,
+            bg=COLOR_SURFACE,
+            fg=COLOR_TEXT_SECONDARY,
+            selectbackground=COLOR_ACCENT_SUBTLE,
+            selectforeground=COLOR_TEXT,
+            highlightthickness=1,
+            highlightbackground=COLOR_BORDER,
+            bd=0,
+            activestyle="none",
+            font=(UI_FONT, 10),
+        )
+        scrollbar = ttk.Scrollbar(
+            list_frame,
+            orient=tk.VERTICAL,
+            command=app_list.yview,
+            style="Dark.Vertical.TScrollbar",
+        )
+        app_list.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        app_list.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        detail_label = tk.Label(
+            body,
+            text="選取程式後會在這裡顯示執行檔位置",
+            fg=COLOR_TEXT_MUTED,
+            bg=COLOR_CANVAS,
+            font=(UI_FONT, 9),
+            anchor="w",
+        )
+        detail_label.pack(fill=tk.X, pady=(9, 0))
+        status_label = tk.Label(
+            body,
+            text="",
+            fg=COLOR_ACCENT,
+            bg=COLOR_CANVAS,
+            font=(UI_FONT, 9),
+            anchor="w",
+        )
+        status_label.pack(fill=tk.X, pady=(3, 0))
+
+        footer = tk.Frame(dialog, bg=COLOR_CHROME, height=62)
+        footer.pack(fill=tk.X)
+        footer.pack_propagate(False)
+
+        applications: list[RunningApplication] = []
+        visible_applications: list[RunningApplication] = []
+
+        def refresh_results(*_args: object) -> None:
+            query = search_var.get().strip().casefold()
+            visible_applications.clear()
+            visible_applications.extend(
+                application
+                for application in applications
+                if not query
+                or query in application.name.casefold()
+                or query in application.title.casefold()
+                or query in application.path.casefold()
+            )
+            app_list.delete(0, tk.END)
+            for application in visible_applications:
+                label = application.name
+                if application.title.casefold() != application.name.casefold():
+                    label += f"    ·    {application.title}"
+                app_list.insert(tk.END, f"  {label}")
+            status_label.configure(
+                text=(
+                    f"顯示 {len(visible_applications)} 個程式"
+                    if visible_applications
+                    else "沒有符合的執行中程式"
+                )
+            )
+            detail_label.configure(text="選取程式後會在這裡顯示執行檔位置")
+            if visible_applications:
+                app_list.selection_set(0)
+                app_list.activate(0)
+                show_selection()
+
+        def scan_applications() -> None:
+            status_label.configure(text="正在讀取執行中的程式…")
+            dialog.update_idletasks()
+            try:
+                applications[:] = list_running_applications()
+            except (OSError, AttributeError) as error:
+                applications.clear()
+                messagebox.showerror(
+                    "無法讀取執行中的程式",
+                    str(error),
+                    parent=dialog,
+                )
+            refresh_results()
+
+        def show_selection(_event: tk.Event | None = None) -> None:
+            selection = app_list.curselection()
+            if not selection or selection[0] >= len(visible_applications):
+                return
+            detail_label.configure(text=visible_applications[selection[0]].path)
+
+        def choose_application(_event: tk.Event | None = None) -> None:
+            selection = app_list.curselection()
+            if not selection or selection[0] >= len(visible_applications):
+                return
+            application = visible_applications[selection[0]]
+            dialog.destroy()
+            self._open_task_editor(seed_application=application)
+
+        ttk.Button(
+            search_row,
+            text="重新整理",
+            command=scan_applications,
+            style="Secondary.TButton",
+        ).pack(side=tk.LEFT, padx=(8, 0))
+        tk.Button(
+            footer,
+            text="建立任務",
+            command=choose_application,
+            bg=COLOR_ACCENT,
+            fg=COLOR_CHROME,
+            activebackground=COLOR_ACCENT_HOVER,
+            activeforeground=COLOR_CHROME,
+            relief=tk.FLAT,
+            bd=0,
+            padx=20,
+            pady=8,
+            font=(UI_FONT, 10, "bold"),
+            cursor="hand2",
+        ).pack(side=tk.RIGHT, padx=(8, 20), pady=13)
+        tk.Button(
+            footer,
+            text="取消",
+            command=dialog.destroy,
+            bg=COLOR_SURFACE_RAISED,
+            fg=COLOR_TEXT_SECONDARY,
+            activebackground=COLOR_SURFACE_HOVER,
+            activeforeground=COLOR_TEXT,
+            relief=tk.FLAT,
+            bd=0,
+            padx=18,
+            pady=8,
+            font=(UI_FONT, 10),
+            cursor="hand2",
+        ).pack(side=tk.RIGHT, pady=13)
+
+        search_var.trace_add("write", refresh_results)
+        app_list.bind("<<ListboxSelect>>", show_selection)
+        app_list.bind("<Double-Button-1>", choose_application)
+        dialog.bind("<Return>", choose_application)
+        dialog.bind("<Escape>", lambda _event: dialog.destroy())
+        dialog.bind("<Control-f>", lambda _event: search_entry.focus_set())
+        scan_applications()
+        search_entry.focus_set()
+
     def edit_task(self, index: int | None = None) -> None:
         if index is None:
             index = self._selected_index()
@@ -913,15 +1182,29 @@ class TodoApp:
             return
         self._open_task_editor(index)
 
-    def _open_task_editor(self, index: int | None = None) -> None:
+    def _open_task_editor(
+        self,
+        index: int | None = None,
+        seed_application: RunningApplication | None = None,
+    ) -> None:
         is_new = index is None
         if is_new:
             working_task = {
-                "task": "",
+                "task": seed_application.name if seed_application else "",
                 "group_id": UNGROUPED_ID,
                 "completion_mode": DAILY,
                 "last_completed_at": None,
-                "quick_launch": [],
+                "quick_launch": (
+                    [
+                        {
+                            "target": seed_application.path,
+                            "args": [],
+                            "focus_existing": True,
+                        }
+                    ]
+                    if seed_application
+                    else []
+                ),
             }
         else:
             working_task = copy.deepcopy(self.data["tasks"][index])
@@ -932,49 +1215,49 @@ class TodoApp:
         dialog.resizable(False, False)
         dialog.transient(self.root)
         dialog.grab_set()
-        dialog.configure(bg="#202329")
+        dialog.configure(bg=COLOR_CANVAS)
 
-        header = tk.Frame(dialog, bg="#17191d", height=64)
+        header = tk.Frame(dialog, bg=COLOR_CHROME, height=64)
         header.pack(fill=tk.X)
         header.pack_propagate(False)
         tk.Label(
             header,
             text="新增任務" if is_new else "編輯任務",
-            fg="#f4f6fa",
-            bg="#17191d",
-            font=("Segoe UI Semibold", 17),
+            fg=COLOR_TEXT,
+            bg=COLOR_CHROME,
+            font=(UI_FONT_DISPLAY, 17, "bold"),
         ).pack(side=tk.LEFT, padx=20, fill=tk.Y)
 
-        content = tk.Frame(dialog, bg="#202329")
+        content = tk.Frame(dialog, bg=COLOR_CANVAS)
         content.pack(fill=tk.BOTH, expand=True, padx=20, pady=16)
 
         tk.Label(
             content,
             text="任務名稱",
-            fg="#aeb5c0",
-            bg="#202329",
-            font=("Segoe UI Semibold", 9),
+            fg=COLOR_TEXT_SECONDARY,
+            bg=COLOR_CANVAS,
+            font=(UI_FONT, 9, "bold"),
         ).grid(row=0, column=0, sticky="w")
         name_var = tk.StringVar(value=working_task["task"])
         name_entry = tk.Entry(
             content,
             textvariable=name_var,
-            bg="#17191d",
-            fg="#f4f6fa",
-            insertbackground="#ffffff",
-            selectbackground="#3b76d8",
+            bg=COLOR_SURFACE,
+            fg=COLOR_TEXT,
+            insertbackground=COLOR_TEXT,
+            selectbackground=COLOR_ACCENT_SUBTLE,
             relief=tk.FLAT,
             bd=0,
-            font=("Segoe UI", 11),
+            font=(UI_FONT, 11),
         )
         name_entry.grid(row=1, column=0, sticky="ew", ipady=9, pady=(5, 14))
 
         tk.Label(
             content,
             text="完成模式",
-            fg="#aeb5c0",
-            bg="#202329",
-            font=("Segoe UI Semibold", 9),
+            fg=COLOR_TEXT_SECONDARY,
+            bg=COLOR_CANVAS,
+            font=(UI_FONT, 9, "bold"),
         ).grid(row=0, column=1, sticky="w", padx=(14, 0))
         mode_var = tk.StringVar(
             value="每日重置"
@@ -994,9 +1277,9 @@ class TodoApp:
         tk.Label(
             content,
             text="所屬群組",
-            fg="#aeb5c0",
-            bg="#202329",
-            font=("Segoe UI Semibold", 9),
+            fg=COLOR_TEXT_SECONDARY,
+            bg=COLOR_CANVAS,
+            font=(UI_FONT, 9, "bold"),
         ).grid(row=2, column=0, columnspan=2, sticky="w")
         group_names = [
             "依規則自動分類",
@@ -1033,33 +1316,33 @@ class TodoApp:
             row=3, column=0, columnspan=2, sticky="ew", ipady=1, pady=(5, 14)
         )
 
-        section_row = tk.Frame(content, bg="#202329")
+        section_row = tk.Frame(content, bg=COLOR_CANVAS)
         section_row.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(2, 6))
         tk.Label(
             section_row,
             text="啟動項目",
-            fg="#f4f6fa",
-            bg="#202329",
-            font=("Segoe UI Semibold", 11),
+            fg=COLOR_TEXT,
+            bg=COLOR_CANVAS,
+            font=(UI_FONT, 11, "bold"),
         ).pack(side=tk.LEFT)
         launch_count_label = tk.Label(
             section_row,
-            fg="#78a9ff",
-            bg="#202329",
-            font=("Segoe UI", 9),
+            fg=COLOR_ACCENT,
+            bg=COLOR_CANVAS,
+            font=(UI_FONT, 9),
         )
         launch_count_label.pack(side=tk.RIGHT)
 
         launch_list = tk.Listbox(
             content,
-            bg="#17191d",
-            fg="#d6dae1",
-            selectbackground="#344f78",
-            selectforeground="#ffffff",
+            bg=COLOR_SURFACE,
+            fg=COLOR_TEXT_SECONDARY,
+            selectbackground=COLOR_ACCENT_SUBTLE,
+            selectforeground=COLOR_TEXT,
             highlightthickness=1,
-            highlightbackground="#343a44",
+            highlightbackground=COLOR_BORDER,
             bd=0,
-            font=("Segoe UI", 9),
+            font=(UI_FONT, 9),
             height=8,
         )
         launch_list.grid(row=5, column=0, columnspan=2, sticky="nsew")
@@ -1151,7 +1434,7 @@ class TodoApp:
             item["focus_existing"] = not item.get("focus_existing", False)
             refresh_launches(launch_index)
 
-        launch_controls = tk.Frame(content, bg="#202329")
+        launch_controls = tk.Frame(content, bg=COLOR_CANVAS)
         launch_controls.grid(row=6, column=0, columnspan=2, sticky="ew", pady=(8, 0))
         ttk.Button(
             launch_controls,
@@ -1178,7 +1461,7 @@ class TodoApp:
             style="Secondary.TButton",
         ).pack(side=tk.LEFT)
 
-        footer = tk.Frame(dialog, bg="#17191d", height=62)
+        footer = tk.Frame(dialog, bg=COLOR_CHROME, height=62)
         footer.pack(fill=tk.X)
         footer.pack_propagate(False)
 
@@ -1215,30 +1498,30 @@ class TodoApp:
             footer,
             text="儲存任務",
             command=save_changes,
-            bg="#3b76d8",
-            fg="white",
-            activebackground="#4b86e8",
-            activeforeground="white",
+            bg=COLOR_ACCENT,
+            fg=COLOR_CHROME,
+            activebackground=COLOR_ACCENT_HOVER,
+            activeforeground=COLOR_CHROME,
             relief=tk.FLAT,
             bd=0,
             padx=20,
             pady=8,
-            font=("Segoe UI Semibold", 10),
+            font=(UI_FONT, 10, "bold"),
             cursor="hand2",
         ).pack(side=tk.RIGHT, padx=(8, 20), pady=13)
         tk.Button(
             footer,
             text="取消",
             command=dialog.destroy,
-            bg="#292d34",
-            fg="#d6dae1",
-            activebackground="#343943",
-            activeforeground="white",
+            bg=COLOR_SURFACE_RAISED,
+            fg=COLOR_TEXT_SECONDARY,
+            activebackground=COLOR_SURFACE_HOVER,
+            activeforeground=COLOR_TEXT,
             relief=tk.FLAT,
             bd=0,
             padx=18,
             pady=8,
-            font=("Segoe UI", 10),
+            font=(UI_FONT, 10),
             cursor="hand2",
         ).pack(side=tk.RIGHT, pady=13)
 
@@ -1253,17 +1536,17 @@ class TodoApp:
         dialog.resizable(False, False)
         dialog.transient(self.root)
         dialog.grab_set()
-        dialog.configure(bg="#202329")
+        dialog.configure(bg=COLOR_CANVAS)
 
-        header = tk.Frame(dialog, bg="#17191d", height=58)
+        header = tk.Frame(dialog, bg=COLOR_CHROME, height=58)
         header.pack(fill=tk.X)
         header.pack_propagate(False)
         tk.Label(
             header,
             text="偏好設定",
-            fg="#f4f6fa",
-            bg="#17191d",
-            font=("Segoe UI Semibold", 16),
+            fg=COLOR_TEXT,
+            bg=COLOR_CHROME,
+            font=(UI_FONT_DISPLAY, 16, "bold"),
         ).pack(side=tk.LEFT, padx=18, fill=tk.Y)
 
         auto_hide = tk.BooleanVar(
@@ -1290,37 +1573,37 @@ class TodoApp:
             value=self.data["settings"].get("show_task_details", True)
         )
         working_groups = copy.deepcopy(self.data["groups"])
-        setting_area = tk.Frame(dialog, bg="#202329")
+        setting_area = tk.Frame(dialog, bg=COLOR_CANVAS)
         setting_area.pack(fill=tk.BOTH, expand=True, padx=20, pady=14)
 
         tk.Label(
             setting_area,
             text="外觀與版面",
-            fg="#f4f6fa",
-            bg="#202329",
-            font=("Segoe UI Semibold", 11),
+            fg=COLOR_TEXT,
+            bg=COLOR_CANVAS,
+            font=(UI_FONT, 11, "bold"),
         ).pack(anchor="w")
-        appearance_row = tk.Frame(setting_area, bg="#202329")
+        appearance_row = tk.Frame(setting_area, bg=COLOR_CANVAS)
         appearance_row.pack(fill=tk.X, pady=(8, 10))
         for title, variable, values, width in (
             ("資訊密度", density_var, tuple(density_labels), 10),
             ("面板寬度", width_var, tuple(PANEL_WIDTHS), 14),
         ):
-            field = tk.Frame(appearance_row, bg="#202329")
+            field = tk.Frame(appearance_row, bg=COLOR_CANVAS)
             field.pack(side=tk.LEFT, padx=(0, 14))
             tk.Label(
-                field, text=title, fg="#aeb5c0", bg="#202329",
-                font=("Segoe UI Semibold", 9),
+                field, text=title, fg=COLOR_TEXT_SECONDARY, bg=COLOR_CANVAS,
+                font=(UI_FONT, 9, "bold"),
             ).pack(anchor="w", pady=(0, 4))
             ttk.Combobox(
                 field, textvariable=variable, values=values, state="readonly",
                 width=width, style="Dark.TCombobox",
             ).pack()
-        details_field = tk.Frame(appearance_row, bg="#202329")
+        details_field = tk.Frame(appearance_row, bg=COLOR_CANVAS)
         details_field.pack(side=tk.LEFT, fill=tk.Y)
         tk.Label(
-            details_field, text="卡片資訊", fg="#aeb5c0", bg="#202329",
-            font=("Segoe UI Semibold", 9),
+            details_field, text="卡片資訊", fg=COLOR_TEXT_SECONDARY,
+            bg=COLOR_CANVAS, font=(UI_FONT, 9, "bold"),
         ).pack(anchor="w", pady=(0, 4))
         ttk.Checkbutton(
             details_field, text="顯示啟動數與完成時間", variable=show_details,
@@ -1333,85 +1616,86 @@ class TodoApp:
         tk.Label(
             setting_area,
             text="關閉後，啟動完成時面板會維持展開。",
-            fg="#8f98a6",
-            bg="#202329",
-            font=("Segoe UI", 9),
+            fg=COLOR_TEXT_MUTED,
+            bg=COLOR_CANVAS,
+            font=(UI_FONT, 9),
         ).pack(anchor="w", padx=(24, 0), pady=(4, 0))
 
-        tk.Frame(setting_area, bg="#343a44", height=1).pack(
+        tk.Frame(setting_area, bg=COLOR_BORDER, height=1).pack(
             fill=tk.X, pady=(14, 12)
         )
-        group_heading = tk.Frame(setting_area, bg="#202329")
+        group_heading = tk.Frame(setting_area, bg=COLOR_CANVAS)
         group_heading.pack(fill=tk.X)
         tk.Label(
             group_heading,
             text="任務群組",
-            fg="#f4f6fa",
-            bg="#202329",
-            font=("Segoe UI Semibold", 11),
+            fg=COLOR_TEXT,
+            bg=COLOR_CANVAS,
+            font=(UI_FONT, 11, "bold"),
         ).pack(side=tk.LEFT)
         tk.Label(
             group_heading,
             text="顯示順序由上到下",
-            fg="#858e9b",
-            bg="#202329",
-            font=("Segoe UI", 9),
+            fg=COLOR_TEXT_MUTED,
+            bg=COLOR_CANVAS,
+            font=(UI_FONT, 9),
         ).pack(side=tk.RIGHT)
 
-        group_area = tk.Frame(setting_area, bg="#202329")
+        group_area = tk.Frame(setting_area, bg=COLOR_CANVAS)
         group_area.pack(fill=tk.BOTH, expand=True, pady=(8, 0))
         group_list = tk.Listbox(
             group_area,
             width=24,
-            bg="#17191d",
-            fg="#dfe3e9",
-            selectbackground="#344f78",
-            selectforeground="#ffffff",
+            bg=COLOR_SURFACE,
+            fg=COLOR_TEXT_SECONDARY,
+            selectbackground=COLOR_ACCENT_SUBTLE,
+            selectforeground=COLOR_TEXT,
             highlightthickness=1,
-            highlightbackground="#343a44",
+            highlightbackground=COLOR_BORDER,
             bd=0,
-            font=("Segoe UI", 10),
+            font=(UI_FONT, 10),
             activestyle="none",
         )
         group_list.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        editor = tk.Frame(group_area, bg="#292d34", width=330)
+        editor = tk.Frame(group_area, bg=COLOR_SURFACE_RAISED, width=330)
         editor.pack(side=tk.LEFT, fill=tk.BOTH, padx=(12, 0))
         editor.pack_propagate(False)
         tk.Label(
-            editor, text="群組名稱", fg="#aeb5c0", bg="#292d34",
-            font=("Segoe UI Semibold", 9),
+            editor, text="群組名稱", fg=COLOR_TEXT_SECONDARY,
+            bg=COLOR_SURFACE_RAISED, font=(UI_FONT, 9, "bold"),
         ).pack(anchor="w", padx=14, pady=(14, 5))
         group_name = tk.StringVar()
         group_entry = tk.Entry(
-            editor, textvariable=group_name, bg="#17191d", fg="#f4f6fa",
-            insertbackground="#ffffff", selectbackground="#3b76d8",
-            relief=tk.FLAT, bd=0, font=("Segoe UI", 11),
+            editor, textvariable=group_name, bg=COLOR_SURFACE, fg=COLOR_TEXT,
+            insertbackground=COLOR_TEXT, selectbackground=COLOR_ACCENT_SUBTLE,
+            relief=tk.FLAT, bd=0, font=(UI_FONT, 11),
         )
         group_entry.pack(fill=tk.X, padx=14, ipady=8)
-        identity_row = tk.Frame(editor, bg="#292d34")
+        identity_row = tk.Frame(editor, bg=COLOR_SURFACE_RAISED)
         identity_row.pack(fill=tk.X, padx=14, pady=(12, 0))
-        icon_field = tk.Frame(identity_row, bg="#292d34")
+        icon_field = tk.Frame(identity_row, bg=COLOR_SURFACE_RAISED)
         icon_field.pack(side=tk.LEFT, anchor="n")
         tk.Label(
-            icon_field, text="圖示／符號", fg="#aeb5c0", bg="#292d34",
-            font=("Segoe UI Semibold", 9),
+            icon_field, text="圖示／符號", fg=COLOR_TEXT_SECONDARY,
+            bg=COLOR_SURFACE_RAISED, font=(UI_FONT, 9, "bold"),
         ).pack(anchor="w", pady=(0, 5))
         group_icon = tk.StringVar()
         icon_entry = tk.Entry(
-            icon_field, textvariable=group_icon, width=8, bg="#17191d",
-            fg="#f4f6fa", insertbackground="#ffffff", selectbackground="#3b76d8",
+            icon_field, textvariable=group_icon, width=8, bg=COLOR_SURFACE,
+            fg=COLOR_TEXT, insertbackground=COLOR_TEXT,
+            selectbackground=COLOR_ACCENT_SUBTLE,
             relief=tk.FLAT, bd=0, font=("Segoe UI Emoji", 11), justify=tk.CENTER,
         )
         icon_entry.pack(ipady=7)
-        color_field = tk.Frame(identity_row, bg="#292d34")
+        color_field = tk.Frame(identity_row, bg=COLOR_SURFACE_RAISED)
         color_field.pack(side=tk.LEFT, anchor="n", padx=(14, 0))
         tk.Label(
-            color_field, text="強調色", fg="#aeb5c0", bg="#292d34",
-            font=("Segoe UI Semibold", 9),
+            color_field, text="強調色", fg=COLOR_TEXT_SECONDARY,
+            bg=COLOR_SURFACE_RAISED, font=(UI_FONT, 9, "bold"),
         ).pack(anchor="w", pady=(0, 5))
         group_color = tk.StringVar()
-        color_controls = tk.Frame(color_field, bg="#292d34")
+        color_controls = tk.Frame(color_field, bg=COLOR_SURFACE_RAISED)
         color_controls.pack()
         color_box = ttk.Combobox(
             color_controls, textvariable=group_color, values=tuple(GROUP_COLORS),
@@ -1447,11 +1731,12 @@ class TodoApp:
         color_box.bind("<<ComboboxSelected>>", refresh_color_swatch)
         tk.Button(
             color_field, text="自訂色…", command=choose_group_color,
-            bg="#343943", fg="#d6dae1", activebackground="#414753",
-            activeforeground="#ffffff", relief=tk.FLAT, bd=0,
-            padx=8, pady=4, font=("Segoe UI", 8), cursor="hand2",
+            bg=COLOR_SURFACE_HOVER, fg=COLOR_TEXT_SECONDARY,
+            activebackground=COLOR_BORDER_STRONG, activeforeground=COLOR_TEXT,
+            relief=tk.FLAT, bd=0, padx=8, pady=4,
+            font=(UI_FONT, 8), cursor="hand2",
         ).pack(anchor="w", pady=(6, 0))
-        behavior_row = tk.Frame(editor, bg="#292d34")
+        behavior_row = tk.Frame(editor, bg=COLOR_SURFACE_RAISED)
         behavior_row.pack(fill=tk.X, padx=10, pady=(10, 0))
         group_batch = tk.BooleanVar()
         ttk.Checkbutton(
@@ -1618,7 +1903,7 @@ class TodoApp:
             refresh_groups(target)
 
         group_list.bind("<<ListboxSelect>>", select_group)
-        group_buttons = tk.Frame(setting_area, bg="#202329")
+        group_buttons = tk.Frame(setting_area, bg=COLOR_CANVAS)
         group_buttons.pack(fill=tk.X, pady=(9, 0))
         for text, command in (
             ("＋ 新增", add_group),
@@ -1660,37 +1945,37 @@ class TodoApp:
                 for task, group_id in zip(self.data["tasks"], previous_task_groups):
                     task["group_id"] = group_id
 
-        controls = tk.Frame(dialog, bg="#17191d", height=58)
+        controls = tk.Frame(dialog, bg=COLOR_CHROME, height=58)
         controls.pack(fill=tk.X)
         controls.pack_propagate(False)
         tk.Button(
             controls,
             text="儲存設定",
             command=save_settings,
-            bg="#3b76d8",
-            fg="white",
-            activebackground="#4b86e8",
-            activeforeground="white",
+            bg=COLOR_ACCENT,
+            fg=COLOR_CHROME,
+            activebackground=COLOR_ACCENT_HOVER,
+            activeforeground=COLOR_CHROME,
             relief=tk.FLAT,
             bd=0,
             padx=18,
             pady=7,
-            font=("Segoe UI Semibold", 9),
+            font=(UI_FONT, 9, "bold"),
             cursor="hand2",
         ).pack(side=tk.RIGHT, padx=(8, 16), pady=12)
         tk.Button(
             controls,
             text="取消",
             command=dialog.destroy,
-            bg="#292d34",
-            fg="#d6dae1",
-            activebackground="#343943",
-            activeforeground="white",
+            bg=COLOR_SURFACE_RAISED,
+            fg=COLOR_TEXT_SECONDARY,
+            activebackground=COLOR_SURFACE_HOVER,
+            activeforeground=COLOR_TEXT,
             relief=tk.FLAT,
             bd=0,
             padx=16,
             pady=7,
-            font=("Segoe UI", 9),
+            font=(UI_FONT, 9),
             cursor="hand2",
         ).pack(side=tk.RIGHT, pady=12)
 
@@ -1850,14 +2135,15 @@ class TodoApp:
         self.toast_window = toast
         toast.overrideredirect(True)
         toast.attributes("-topmost", True)
-        toast.configure(bg="#202020")
+        toast.configure(bg=COLOR_SURFACE_RAISED)
         tk.Label(
             toast,
             text=message,
-            bg="#202020",
-            fg="#ffffff",
+            bg=COLOR_SURFACE_RAISED,
+            fg=COLOR_TEXT,
             padx=16,
             pady=10,
+            font=(UI_FONT, 9),
         ).pack()
         toast.update_idletasks()
         x = self.edge_x - toast.winfo_reqwidth() - 16
